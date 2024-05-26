@@ -3,9 +3,9 @@ use actix_cors::Cors;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use eyre::{Result, eyre};
-use log::{debug, info, error};
+use log::{debug, info, error, LevelFilter};
 use env_logger::{Env, Builder};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::PathBuf;
 use tokio;
@@ -51,6 +51,18 @@ lazy_static! {
     };
 }
 
+fn init_logger() {
+    let env = Env::default().filter_or("RUST_LOG", "info");
+    let mut builder = Builder::from_env(env);
+    builder.filter(None, LevelFilter::Info);
+    if let Ok(rust_log) = env::var("RUST_LOG") {
+        builder.filter(Some("obsidian_bookmark"), rust_log.parse().unwrap_or(LevelFilter::Info));
+    } else {
+        builder.filter(Some("obsidian_bookmark"), LevelFilter::Info);
+    }
+    builder.init();
+}
+
 #[derive(Parser, Debug)]
 struct Cli {
     #[arg(long, default_value = "5000")]
@@ -77,20 +89,49 @@ struct Bookmark {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+struct Frontmatter {
+    date: String,
+    day: String,
+    time: String,
+    tags: Vec<String>,
+    url: String,
+    author: String,
+    published: String,
+}
+
+impl Default for Frontmatter {
+    fn default() -> Self {
+        Frontmatter {
+            date: "".to_string(),
+            day: "".to_string(),
+            time: "".to_string(),
+            tags: vec![],
+            url: "".to_string(),
+            author: "".to_string(),
+            published: "".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
 struct Config {
     vault: PathBuf,
     frontmatter: Frontmatter,
     links: Vec<Link>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-struct Frontmatter {
-    date: Option<String>,
-    day: Option<String>,
-    time: Option<String>,
-    tags: Option<Vec<String>>,
-    url: Option<String>,
-    author: Option<String>,
+impl Config {
+    fn complete_frontmatter(frontmatter: Frontmatter) -> Frontmatter {
+        Frontmatter {
+            date: frontmatter.date,
+            day: frontmatter.day,
+            time: frontmatter.time,
+            tags: frontmatter.tags,
+            url: frontmatter.url,
+            author: frontmatter.author,
+            published: frontmatter.published,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -103,6 +144,7 @@ struct Link {
 
 #[derive(Debug)]
 struct VideoMetadata {
+    #[allow(dead_code)]
     id: String,
     title: String,
     description: String,
@@ -188,8 +230,9 @@ fn load_config(config_path: PathBuf) -> Result<Config> {
     let config_path_expanded = expanduser(config_path_str)?;
     let config_str = std::fs::read_to_string(config_path_expanded)
         .map_err(|e| eyre!("Failed to read config file: {}", e))?;
-    let config: Config = serde_yaml::from_str(&config_str)
+    let mut config: Config = serde_yaml::from_str(&config_str)
         .map_err(|e| eyre!("Failed to parse config file: {}", e))?;
+    config.frontmatter = Config::complete_frontmatter(config.frontmatter);
     Ok(config)
 }
 
@@ -204,7 +247,7 @@ fn extract_video_id(url: &str) -> Result<String> {
         .ok_or_else(|| eyre!("Failed to extract video ID from URL"))
 }
 
-async fn create_markdown_file(title: &str, description: &str, embed_code: &str, url: &str, author: &str, tags: &[String], vault_path: &PathBuf, folder: &str, frontmatter: &Frontmatter) -> Result<()> {
+async fn create_markdown_file(title: &str, description: &str, embed_code: &str, url: &str, author: &str, tags: &[String], vault_path: &PathBuf, folder: &str, frontmatter: &Frontmatter, published: &str) -> Result<()> {
     debug!("create_markdown_file: title={} description={} embed_code={} url={} author={} tags={:?} vault_path={} folder={} frontmatter={:?}", title, description, embed_code, url, author, tags, vault_path.display(), folder, frontmatter);
     let vault_path_str = vault_path.to_str().ok_or_else(|| eyre!("Failed to convert vault path to string"))?;
     let vault_path_expanded = expanduser(vault_path_str)?;
@@ -218,29 +261,30 @@ async fn create_markdown_file(title: &str, description: &str, embed_code: &str, 
     let mut file = std::fs::File::create(&file_path)
         .map_err(|e| eyre!("Failed to create markdown file: {:?} with error {}", file_path, e))?;
 
-    let frontmatter_str = format_frontmatter(frontmatter, url, author, tags);
+    let frontmatter_str = format_frontmatter(frontmatter, url, author, tags, published);
     write!(file, "{}\n{}\n\n## Description\n{}", frontmatter_str, embed_code, description)
         .map_err(|e| eyre!("Failed to write to markdown file: {}", e))
 }
 
-fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: &[String]) -> String {
+fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: &[String], published: &str) -> String {
     debug!("format_frontmatter: frontmatter={:?} url={} author={} tags={:?}", frontmatter, url, author, tags);
     let mut frontmatter_str = String::from("---\n");
 
     let (current_date, current_day, current_time) = today();
-    frontmatter_str += &format!("date: {}\n", frontmatter.date.as_ref().unwrap_or(&current_date));
-    frontmatter_str += &format!("day: {}\n", frontmatter.day.as_ref().unwrap_or(&current_day));
-    frontmatter_str += &format!("time: {}\n", frontmatter.time.as_ref().unwrap_or(&current_time));
+    frontmatter_str += &format!("date: {}\n", if frontmatter.date.is_empty() { current_date } else { frontmatter.date.clone() });
+    frontmatter_str += &format!("day: {}\n", if frontmatter.day.is_empty() { current_day } else { frontmatter.day.clone() });
+    frontmatter_str += &format!("time: {}\n", if frontmatter.time.is_empty() { current_time } else { frontmatter.time.clone() });
 
-    frontmatter_str += &format!("tags:\n");
+    frontmatter_str += "tags:\n";
     for tag in tags {
         frontmatter_str += &format!("  - {}\n", sanitize_tag(tag));
     }
 
     frontmatter_str += &format!("url: {}\n", url);
     frontmatter_str += &format!("author: {}\n", author);
-    frontmatter_str += &format!("type: {}\n", frontmatter.url.as_deref().unwrap_or("link"));
-    
+    frontmatter_str += &format!("published: {}\n", if frontmatter.published.is_empty() { published.to_string() } else { frontmatter.published.clone() });
+    frontmatter_str += &format!("type: {}\n", frontmatter.url);
+
     frontmatter_str += "---\n\n";
     frontmatter_str
 }
@@ -306,8 +350,13 @@ async fn handle_shorts_url(url: &str, folder: &str, width: usize, height: usize,
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
 
-    let tags_from_title = extract_tags_from_youtube(&metadata.title);
-    let clean_title = sanitize_filename(&metadata.title);
+    let tags_from_title = extract_tags_from_string(&metadata.title);
+    let clean_title = remove_tags_from_string(&metadata.title);
+
+    let mut combined_tags: HashSet<String> = HashSet::new();
+    combined_tags.extend(tags_from_title);
+    combined_tags.extend(metadata.tags);
+    let combined_tags_vec: Vec<String> = combined_tags.into_iter().collect();
 
     create_markdown_file(
         &clean_title,
@@ -315,10 +364,11 @@ async fn handle_shorts_url(url: &str, folder: &str, width: usize, height: usize,
         &embed_code,
         url,
         &metadata.channel,
-        &tags_from_title,
+        &combined_tags_vec,
         &config.vault,
         folder,
-        &config.frontmatter
+        &config.frontmatter,
+        &metadata.published_at
     ).await
 }
 
@@ -328,17 +378,25 @@ async fn handle_youtube_url(url: &str, folder: &str, width: usize, height: usize
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
 
-    let tags_from_description = extract_tags_from_youtube(&metadata.description);
+    let tags_from_title = extract_tags_from_string(&metadata.title);
+    let clean_title = remove_tags_from_string(&metadata.title);
+
+    let mut combined_tags: HashSet<String> = HashSet::new();
+    combined_tags.extend(tags_from_title);
+    combined_tags.extend(metadata.tags);
+    let combined_tags_vec: Vec<String> = combined_tags.into_iter().collect();
+
     create_markdown_file(
-        &metadata.title,
+        &clean_title,
         &metadata.description,
         &embed_code,
         url,
         &metadata.channel,
-        &tags_from_description,
+        &combined_tags_vec,
         &config.vault,
         folder,
-        &config.frontmatter
+        &config.frontmatter,
+        &metadata.published_at
     ).await
 }
 
@@ -348,41 +406,49 @@ async fn download_webpage(url: &str) -> Result<String> {
     Ok(content)
 }
 
-fn extract_data_from_webpage(content: &str) -> (String, String, String, String, Vec<String>) {
+fn extract_data_from_webpage(content: &str) -> (String, String, String, String, String, Vec<String>) {
     let document = Html::parse_document(content);
     let title_selector = Selector::parse("title").unwrap();
     let meta_selector = Selector::parse("meta[name='description']").unwrap();
     let author_selector = Selector::parse("meta[name='author'], .author").unwrap();
+    let published_selector = Selector::parse("meta[property='article:published_time']").unwrap();
     let image_selector = Selector::parse("meta[property='og:image']").unwrap();
     
     let title = document.select(&title_selector).next().map_or("".to_string(), |e| e.inner_html());
     let summary = document.select(&meta_selector).next().map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
     let author = document.select(&author_selector).next().map_or("Not specified".to_string(), |e| e.text().collect::<Vec<_>>().join(" "));
+    let published = document.select(&published_selector).next().map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
     let image = document.select(&image_selector).next().map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
-    let tags = vec![]; // Extract tags if available
+    let tags = vec![]; //FIXME: should attempt to find tags
 
-    (title, summary, author, image, tags)
+    (title, summary, author, published, image, tags)
 }
 
-fn extract_tags_from_youtube(description: &str) -> Vec<String> {
+fn extract_tags_from_string(text: &str) -> Vec<String> {
     let re = Regex::new(r"#(\w+)").unwrap();
-    re.captures_iter(description)
+    re.captures_iter(text)
         .map(|cap| cap[1].to_string())
         .collect()
 }
 
-async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, String, String, String, Vec<String>)> {
+fn remove_tags_from_string(text: &str) -> String {
+    let re = Regex::new(r"#(\w+)").unwrap();
+    re.replace_all(text, "").to_string()
+}
+
+async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, String, String, String, String, Vec<String>)> {
     let content = download_webpage(url).await?;
-    let (title, summary, author, image, tags) = extract_data_from_webpage(&content);
+    let (title, summary, author, published, image, tags) = extract_data_from_webpage(&content);
 
     debug!("Fetched content from URL: {}", url);
-    debug!("Extracted data - Title: {}, Summary: {}, Author: {}, Image: {}, Tags: {:?}", title, summary, author, image, tags);
+    debug!("Extracted data - Title: {}, Summary: {}, Author: {}, Published: {}, Image: {}, Tags: {:?}", title, summary, author, published, image, tags);
 
     let prompt = format!(
         "Please provide a JSON object with the following details about the URL: {}.
         - Title: {}
         - Summary: {}
         - Author: {}
+        - Published: {}
         - Main Image URL: {}
         - Tags: {:?}
 
@@ -390,11 +456,12 @@ async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, Stri
         - 'title': The title of the article
         - 'summary': A detailed summary of the article (at least 100 words)
         - 'author': The author of the article
+        - 'published': The date of the publication
         - 'main_image_url': The main image URL of the article
         - 'tags': Relevant tags for the article
 
         URL: {}",
-        url, title, summary, author, image, tags, url
+        url, title, summary, author, published, image, tags, url
     );
 
     debug!("Prompt for ChatGPT: {}", prompt);
@@ -436,14 +503,15 @@ async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, Stri
                     let title = parsed["title"].as_str().unwrap_or(&format!("No Title {}", current_date)).to_string();
                     let summary = parsed["summary"].as_str().unwrap_or_default().to_string();
                     let author = parsed["author"].as_str().unwrap_or_default().to_string();
+                    let published = parsed["published"].as_str().unwrap_or_default().to_string();
                     let image = parsed["main_image_url"].as_str().unwrap_or_default().to_string();
                     let tags = parsed["tags"].as_array().map_or_else(Vec::new, |arr| {
                         arr.iter().filter_map(|tag| tag.as_str().map(String::from)).collect()
                     });
 
-                    debug!("Final extracted data - Title: {}, Summary: {}, Author: {}, Image: {}, Tags: {:?}", title, summary, author, image, tags);
+                    debug!("Final extracted data - Title: {}, Summary: {}, Author: {}, Published: {}, Image: {}, Tags: {:?}", title, summary, author, published, image, tags);
 
-                    Ok((title, summary, author, image, tags))
+                    Ok((title, summary, author, published, image, tags))
                 }
                 Err(e) => {
                     error!("Failed to parse extracted JSON string: {}", e);
@@ -470,7 +538,7 @@ fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> Stri
 
 async fn handle_weblink_url(url: &str, folder: &str, width: usize, height: usize, config: &Config) -> Result<()> {
     debug!("handle_weblink_url: url={} folder={} config={:?}", url, folder, config);
-    let (title, summary, author, image, tags) = fetch_and_summarize_url_with_chatgpt(url).await?;
+    let (title, summary, author, published, image, tags) = fetch_and_summarize_url_with_chatgpt(url).await?;
     let embed_code = if !image.is_empty() {
         generate_image_embed_code(&image, width, height)
     } else {
@@ -486,7 +554,8 @@ async fn handle_weblink_url(url: &str, folder: &str, width: usize, height: usize
         &tags,
         &config.vault,
         folder,
-        &config.frontmatter
+        &config.frontmatter,
+        &published
     ).await
 }
 
@@ -513,8 +582,7 @@ async fn bookmark(bookmark: web::Json<Bookmark>, config: web::Data<Config>) -> i
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let env = Env::default().filter_or("RUST_LOG", "info");
-    env_logger::Builder::from_env(env).init();
+    init_logger();
 
     let cli = Cli::parse();
     info!("Starting server with POST endpoint: /process_bookmark");

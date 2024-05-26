@@ -7,6 +7,7 @@ frontmatter:
   type: link
   url:
   author:
+  published:
 links:
   - name: shorts
     regex: https?://(?:www\.)?youtube\.com/shorts/([a-zA-Z0-9_-]+)
