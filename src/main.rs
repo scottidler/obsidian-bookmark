@@ -1,4 +1,4 @@
-use actix_web::{post, web, App, HttpServer, HttpResponse, Responder};
+use actix_web::{get, post, web, App, HttpServer, HttpResponse, Responder};
 use actix_cors::Cors;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -79,13 +79,13 @@ struct Cli {
 #[serde(rename_all = "camelCase")]
 struct Bookmark {
     id: String,
-    parent_id: String,
     index: usize,
     title: String,
     date_added: u64,
+    url: String,
+    folder: Option<String>,
     #[serde(rename = "type")]
     bookmark_type: String,
-    url: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -247,16 +247,23 @@ fn extract_video_id(url: &str) -> Result<String> {
         .ok_or_else(|| eyre!("Failed to extract video ID from URL"))
 }
 
-async fn create_markdown_file(title: &str, description: &str, embed_code: &str, url: &str, author: &str, tags: &[String], vault_path: &PathBuf, folder: &str, frontmatter: &Frontmatter, published: &str) -> Result<()> {
-    debug!("create_markdown_file: title={} description={} embed_code={} url={} author={} tags={:?} vault_path={} folder={} frontmatter={:?}", title, description, embed_code, url, author, tags, vault_path.display(), folder, frontmatter);
+async fn create_markdown_file(title: &str, description: &str, embed_code: &str, url: &str, author: &str, tags: &[String], vault_path: &PathBuf, folder: Option<String>, frontmatter: &Frontmatter, published: &str) -> Result<()> {
+    info!("create_markdown_file: title={} description={} embed_code={} url={} author={} tags={:?} vault_path={} folder={:?} frontmatter={:?}", title, description, embed_code, url, author, tags, vault_path.display(), folder, frontmatter);
     let vault_path_str = vault_path.to_str().ok_or_else(|| eyre!("Failed to convert vault path to string"))?;
     let vault_path_expanded = expanduser(vault_path_str)?;
-    let full_path = vault_path_expanded.join(folder);
 
-    std::fs::create_dir_all(&full_path).map_err(|e| eyre!("Failed to create directory: {:?} with error {}", full_path, e))?;
+    let folder_path = if let Some(folder) = folder {
+        vault_path_expanded.join(folder)
+    } else {
+        vault_path_expanded.clone()
+    };
+
+    std::fs::create_dir_all(&folder_path).map_err(|e| eyre!("Failed to create directory: {:?} with error {}", folder_path, e))?;
 
     let file_name = sanitize_filename(title);
-    let file_path = full_path.join(file_name + ".md");
+    let file_path = folder_path.join(file_name + ".md");
+
+    info!("file_path={:?}", file_path);
 
     let mut file = std::fs::File::create(&file_path)
         .map_err(|e| eyre!("Failed to create markdown file: {:?} with error {}", file_path, e))?;
@@ -344,27 +351,26 @@ async fn fetch_video_metadata(api_key: &str, video_id: &str) -> Result<VideoMeta
     })
 }
 
-async fn handle_shorts_url(url: &str, title: &str, folder: &str, width: usize, height: usize, config: &Config) -> Result<()> {
-    debug!("handle_shorts_url: url={} title={} folder={} width={} height={} config={:?}", url, title, folder, width, height, config);
+async fn handle_shorts_url(url: &str, title: &str, folder: Option<String>, width: usize, height: usize, config: &Config) -> Result<()> {
+    info!("handle_shorts_url: url={}, title={} folder={:?}, width={} height={}, config={:?}", url, title, folder, width, height, config);
     let video_id = extract_video_id(url)?;
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
 
-    let clean_metadata_title = remove_tags_from_string(&metadata.title);
-    let clean_title = remove_tags_from_string(title);
+    let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title);
+    let (title, tags) = extract_title_and_tags(title);
 
     let final_title = if title.is_empty() {
-        clean_metadata_title
+        metadata_title
     } else {
-        clean_title
+        title
     };
 
-    let tags_from_title = extract_tags_from_string(&metadata.title);
-
     let mut combined_tags: HashSet<String> = HashSet::new();
-    combined_tags.extend(tags_from_title);
+    combined_tags.extend(tags);
+    combined_tags.extend(metadata_tags);
     combined_tags.extend(metadata.tags);
-    let combined_tags_vec: Vec<String> = combined_tags.into_iter().collect();
+    let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
     create_markdown_file(
         &final_title,
@@ -372,7 +378,7 @@ async fn handle_shorts_url(url: &str, title: &str, folder: &str, width: usize, h
         &embed_code,
         url,
         &metadata.channel,
-        &combined_tags_vec,
+        &combined_tags,
         &config.vault,
         folder,
         &config.frontmatter,
@@ -380,27 +386,26 @@ async fn handle_shorts_url(url: &str, title: &str, folder: &str, width: usize, h
     ).await
 }
 
-async fn handle_youtube_url(url: &str, title: &str, folder: &str, width: usize, height: usize, config: &Config) -> Result<()> {
-    debug!("handle_youtube_url: url={} title={} folder={} width={} height={} config={:?}", url, title, folder, width, height, config);
+async fn handle_youtube_url(url: &str, title: &str, folder: Option<String>, width: usize, height: usize, config: &Config) -> Result<()> {
+    info!("handle_youtube_url: url={}, title={} folder={:?}, width={} height={}, config={:?}", url, title, folder, width, height, config);
     let video_id = extract_video_id(url)?;
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
 
-    let clean_metadata_title = remove_tags_from_string(&metadata.title);
-    let clean_title = remove_tags_from_string(title);
+    let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title);
+    let (title, tags) = extract_title_and_tags(title);
 
     let final_title = if title.is_empty() {
-        clean_metadata_title
+        metadata_title
     } else {
-        clean_title
+        title
     };
 
-    let tags_from_title = extract_tags_from_string(&metadata.title);
-
     let mut combined_tags: HashSet<String> = HashSet::new();
-    combined_tags.extend(tags_from_title);
+    combined_tags.extend(tags);
+    combined_tags.extend(metadata_tags);
     combined_tags.extend(metadata.tags);
-    let combined_tags_vec: Vec<String> = combined_tags.into_iter().collect();
+    let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
     create_markdown_file(
         &final_title,
@@ -408,11 +413,49 @@ async fn handle_youtube_url(url: &str, title: &str, folder: &str, width: usize, 
         &embed_code,
         url,
         &metadata.channel,
-        &combined_tags_vec,
+        &combined_tags,
         &config.vault,
         folder,
         &config.frontmatter,
         &metadata.published_at
+    ).await
+}
+
+async fn handle_weblink_url(url: &str, title: &str, folder: Option<String>, width: usize, height: usize, config: &Config) -> Result<()> {
+    info!("handle_weblink_url: url={}, title={} folder={:?}, width={} height={}, config={:?}", url, title, folder, width, height, config);
+    let (fetched_title, summary, author, published, image, fetched_tags) = fetch_and_summarize_url_with_chatgpt(url).await?;
+    let embed_code = if !image.is_empty() {
+        generate_image_embed_code(&image, width, height)
+    } else {
+        String::new()
+    };
+
+    let (metadata_title, metadata_tags) = extract_title_and_tags(&fetched_title);
+    let (title, tags) = extract_title_and_tags(title);
+
+    let final_title = if title.is_empty() {
+        metadata_title
+    } else {
+        title
+    };
+
+    let mut combined_tags: HashSet<String> = HashSet::new();
+    combined_tags.extend(tags);
+    combined_tags.extend(metadata_tags);
+    combined_tags.extend(fetched_tags);
+    let combined_tags: Vec<String> = combined_tags.into_iter().collect();
+
+    create_markdown_file(
+        &final_title,
+        &summary,
+        &embed_code,
+        url,
+        &author,
+        &combined_tags,
+        &config.vault,
+        folder,
+        &config.frontmatter,
+        &published
     ).await
 }
 
@@ -440,16 +483,13 @@ fn extract_data_from_webpage(content: &str) -> (String, String, String, String, 
     (title, summary, author, published, image, tags)
 }
 
-fn extract_tags_from_string(text: &str) -> Vec<String> {
-    let re = Regex::new(r"#(\w+)").unwrap();
-    re.captures_iter(text)
-        .map(|cap| cap[1].to_string())
-        .collect()
-}
-
-fn remove_tags_from_string(text: &str) -> String {
-    let re = Regex::new(r"#(\w+)").unwrap();
-    re.replace_all(text, "").to_string()
+fn extract_title_and_tags(text: &str) -> (String, Vec<String>) {
+    let re = Regex::new(r"(?i)\(1\)\s*|#(\w+)").unwrap();
+    let tags: Vec<String> = re.captures_iter(text)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+        .collect();
+    let title = re.replace_all(text, "").to_string();
+    (title.trim().to_string(), tags)
 }
 
 async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, String, String, String, String, Vec<String>)> {
@@ -552,44 +592,12 @@ fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> Stri
     )
 }
 
-async fn handle_weblink_url(url: &str, title: &str, folder: &str, width: usize, height: usize, config: &Config) -> Result<()> {
-    debug!("handle_weblink_url: url={} title={} folder={} config={:?}", url, title, folder, config);
-    let (fetched_title, summary, author, published, image, tags) = fetch_and_summarize_url_with_chatgpt(url).await?;
-    let embed_code = if !image.is_empty() {
-        generate_image_embed_code(&image, width, height)
-    } else {
-        String::new()
-    };
-
-    let clean_fetched_title = remove_tags_from_string(&fetched_title);
-    let clean_title = remove_tags_from_string(title);
-
-    let final_title = if title.is_empty() {
-        clean_fetched_title
-    } else {
-        clean_title
-    };
-
-    create_markdown_file(
-        &final_title,
-        &summary,
-        &embed_code,
-        url,
-        &author,
-        &tags,
-        &config.vault,
-        folder,
-        &config.frontmatter,
-        &published
-    ).await
-}
-
-async fn handle_url(url: &str, title: &str, config: &Config) -> Result<()> {
-    debug!("handle_url: url={} title={} config={:?}", url, title, config);
+async fn handle_url(url: &str, title: &str, folder: Option<String>, config: &Config) -> Result<()> {
+    debug!("handle_url: url={} title={} folder={:?} config={:?}", url, title, folder, config);
     match LinkType::from_url(url, config)? {
-        LinkType::Shorts(url, folder, width, height) => handle_shorts_url(&url, title, &folder, width, height, config).await,
-        LinkType::YouTube(url, folder, width, height) => handle_youtube_url(&url, title, &folder, width, height, config).await,
-        LinkType::WebLink(url, folder, width, height) => handle_weblink_url(&url, title, &folder, width, height, config).await,
+        LinkType::Shorts(url, default_folder, width, height) => handle_shorts_url(&url, title, folder.or(Some(default_folder)), width, height, config).await,
+        LinkType::YouTube(url, default_folder, width, height) => handle_youtube_url(&url, title, folder.or(Some(default_folder)), width, height, config).await,
+        LinkType::WebLink(url, default_folder, width, height) => handle_weblink_url(&url, title, folder.or(Some(default_folder)), width, height, config).await,
     }
 }
 
@@ -598,13 +606,20 @@ async fn bookmark(bookmark: web::Json<Bookmark>, config: web::Data<Config>) -> i
     info!("bookmark:");
     info!("- title: {}", bookmark.title);
     info!("- url: {}", bookmark.url);
-    match handle_url(&bookmark.url, &bookmark.title, &config).await {
+
+    match handle_url(&bookmark.url, &bookmark.title, bookmark.folder.clone(), &config).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
         Err(e) => {
             error!("Failed to process bookmark: {:?}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()}))
         }
     }
+}
+
+#[get("/health")]
+async fn health() -> impl Responder {
+    debug!("/health Ok");
+    HttpResponse::Ok().body("OK")
 }
 
 #[tokio::main]
@@ -619,9 +634,16 @@ async fn main() -> Result<()> {
 
     let server = HttpServer::new(move || {
         info!("Setting up the Actix app with CORS and services");
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
+            .max_age(3600);
         App::new()
             .app_data(web::Data::new(config.clone()))
-            .wrap(Cors::permissive()) 
+            //.wrap(Cors::permissive())
+            .wrap(cors)
+            .service(health)
             .service(bookmark)
     })
     .workers(cli.workers);
@@ -707,15 +729,6 @@ mod tests {
         assert!(matches!(link_type, LinkType::WebLink(..)), "Expected a WebLink for invalid YouTube URL format");
     }
 
-    /*
-    #[tokio::test]
-    async fn test_fetch_metadata_nonexistent_video() {
-        let non_existent_video_id = "thisdoesnotexist12345";
-        let result = fetch_video_metadata(&YOUTUBE_API_KEY, non_existent_video_id).await;
-        assert!(result.is_err(), "Expected an error for non-existent video metadata fetch");
-    }
-    */
-
     #[test]
     fn test_generate_embed_code_non_integer() {
         let video_id = "y4evLICF8kk";
@@ -748,5 +761,21 @@ mod tests {
         ).await;
 
         assert!(result.is_ok(), "Failed to create markdown file with special characters in title");
+    }
+
+    #[test]
+    fn test_extract_title_and_tags() {
+        let text = "(1) Test title with #tag1 and #tag2";
+        let (title, tags) = extract_title_and_tags(text);
+        assert_eq!(title, "Test title with and");
+        assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_title_and_tags_no_prefix() {
+        let text = "Test title with #tag1 and #tag2";
+        let (title, tags) = extract_title_and_tags(text);
+        assert_eq!(title, "Test title with and");
+        assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
     }
 }
