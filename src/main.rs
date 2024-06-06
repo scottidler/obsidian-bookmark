@@ -775,7 +775,7 @@ mod tests {
         let config_path = shellexpand::tilde("~/.config/obsidian-bookmark/obsidian-bookmark.yml");
         let config_path = Path::new(config_path.as_ref());
 
-        load_config(config_path.to_path_buf()).expect("Failed to load config")
+        load_config(config_path).expect("Failed to load config")
     }
 
     #[tokio::test]
