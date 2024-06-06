@@ -341,7 +341,7 @@ fn extract_title_and_tags(text: &str) -> Result<(String, Vec<String>)> {
     Ok((title.trim().to_string(), tags))
 }
 
-async fn create_markdown_file(
+fn create_markdown_file(
     title: &str,
     description: &str,
     embed_code: &str,
@@ -572,7 +572,6 @@ async fn handle_shorts_url(
         &config.frontmatter,
         &metadata.published_at,
     )
-    .await
 }
 
 async fn handle_youtube_url(
@@ -614,7 +613,6 @@ async fn handle_youtube_url(
         &config.frontmatter,
         &metadata.published_at,
     )
-    .await
 }
 
 async fn handle_weblink_url(
@@ -660,7 +658,6 @@ async fn handle_weblink_url(
         &config.frontmatter,
         &published,
     )
-    .await
 }
 
 fn remove_utm_source(url: &str) -> Result<String> {
@@ -877,7 +874,7 @@ mod tests {
         let result = create_markdown_file(
             title,
             description,
-            &embed_code,
+            embed_code,
             url,
             author,
             &tags,
