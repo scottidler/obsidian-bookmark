@@ -1,23 +1,24 @@
-use actix_web::{get, post, web, App, HttpServer, HttpResponse, Responder};
 use actix_cors::Cors;
-use clap::Parser;
-use serde::{Deserialize, Serialize};
-use eyre::{Result, eyre};
-use log::{debug, info, error, LevelFilter};
-use env_logger::{Env, Builder};
-use std::collections::{HashMap, HashSet};
-use std::env;
-use std::path::PathBuf;
-use tokio;
-use reqwest;
+use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use chrono::format::StrftimeItems;
 use chrono::prelude::*;
 use chrono_tz::Tz;
-use chrono::format::StrftimeItems;
-use regex::Regex;
-use scraper::{Html, Selector};
+use clap::Parser;
+use env_logger::{Builder, Env};
+use eyre::{eyre, Result};
 use lazy_static::lazy_static;
+use log::{debug, error, info, LevelFilter};
+use regex::Regex;
+use reqwest;
+use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
+use std::env;
 use std::io::Write;
+use std::path::PathBuf;
+use tokio;
+use url::Url;
 
 lazy_static! {
     static ref TIMEZONE: Tz = "America/Los_Angeles".parse().expect("Invalid timezone");
@@ -59,7 +60,12 @@ struct Cli {
     #[arg(long, default_value = "2")]
     workers: usize,
 
-    #[arg(short, long, value_parser, default_value = "~/.config/obsidian-bookmark/obsidian-bookmark.yml")]
+    #[arg(
+        short,
+        long,
+        value_parser,
+        default_value = "~/.config/obsidian-bookmark/obsidian-bookmark.yml"
+    )]
     config: PathBuf,
 }
 
@@ -193,27 +199,54 @@ fn today() -> (String, String, String) {
 
 fn get_resolution(link_name: &str, config: &Config) -> Result<(usize, usize)> {
     debug!("get_resolution: link_name={} config={:?}", link_name, config);
-    let resolution_key = config.links.iter().find(|link| link.name == link_name)
-        .ok_or_else(|| eyre!("Link type '{}' not found in config", link_name))?.resolution.as_str();
+    let resolution_key = config
+        .links
+        .iter()
+        .find(|link| link.name == link_name)
+        .ok_or_else(|| eyre!("Link type '{}' not found in config", link_name))?
+        .resolution
+        .as_str();
 
     match link_name {
-        "shorts" => SHORTS_RESOLUTIONS.get(resolution_key)
+        "shorts" => SHORTS_RESOLUTIONS
+            .get(resolution_key)
             .copied()
             .ok_or_else(|| eyre!("Resolution not found for shorts")),
-        "youtube" | _ => RESOLUTIONS.get(resolution_key)
+        "youtube" | _ => RESOLUTIONS
+            .get(resolution_key)
             .copied()
             .ok_or_else(|| eyre!("Resolution not found for {}", link_name)),
     }
 }
 
 fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: &[String], published: &str) -> String {
-    debug!("format_frontmatter: frontmatter={:?} url={} author={} tags={:?}", frontmatter, url, author, tags);
+    debug!(
+        "format_frontmatter: frontmatter={:?} url={} author={} tags={:?}",
+        frontmatter, url, author, tags
+    );
     let mut frontmatter_str = String::from("---\n");
 
     let (current_date, current_day, current_time) = today();
-    frontmatter_str += &format!("date: {}\n", if frontmatter.date.is_empty() { current_date } else { frontmatter.date.clone() });
-    frontmatter_str += &format!("day: {}\n", if frontmatter.day.is_empty() { current_day } else { frontmatter.day.clone() });
-    frontmatter_str += &format!("time: {}\n", if frontmatter.time.is_empty() { current_time } else { frontmatter.time.clone() });
+    frontmatter_str += &format!(
+        "date: {}\n",
+        if frontmatter.date.is_empty() {
+            current_date
+        } else {
+            frontmatter.date.clone()
+        }
+    );
+    frontmatter_str += &format!(
+        "day: {}\n",
+        if frontmatter.day.is_empty() { current_day } else { frontmatter.day.clone() }
+    );
+    frontmatter_str += &format!(
+        "time: {}\n",
+        if frontmatter.time.is_empty() {
+            current_time
+        } else {
+            frontmatter.time.clone()
+        }
+    );
 
     frontmatter_str += "tags:\n";
     for tag in tags {
@@ -222,7 +255,14 @@ fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: 
 
     frontmatter_str += &format!("url: {}\n", url);
     frontmatter_str += &format!("author: {}\n", author);
-    frontmatter_str += &format!("published: {}\n", if frontmatter.published.is_empty() { published.to_string() } else { frontmatter.published.clone() });
+    frontmatter_str += &format!(
+        "published: {}\n",
+        if frontmatter.published.is_empty() {
+            published.to_string()
+        } else {
+            frontmatter.published.clone()
+        }
+    );
     frontmatter_str += &format!("type: {}\n", frontmatter.url);
 
     frontmatter_str += "---\n\n";
@@ -232,17 +272,18 @@ fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: 
 fn sanitize_tag(tag: &str) -> String {
     debug!("sanitize_tag: tag={}", tag);
     tag.replace("'", "")
-       .chars()
-       .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { '-' })
-       .collect::<String>()
-       .replace(' ', "-")
-       .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { '-' })
+        .collect::<String>()
+        .replace(' ', "-")
+        .to_lowercase()
 }
 
 fn sanitize_filename(title: &str) -> String {
     debug!("sanitize_filename: title={}", title);
     let re = Regex::new(r"\s{2,}").unwrap();
-    let sanitized_title = title.chars()
+    let sanitized_title = title
+        .chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-')
         .collect::<String>();
     re.replace_all(&sanitized_title, " ").to_string()
@@ -253,7 +294,8 @@ fn extract_video_id(url: &str) -> Result<String> {
     let pattern = Regex::new(r#"(youtu\.be/|youtube\.com/(watch\?(.*&)?v=|(embed|v|shorts)/))([^?&">]+)"#)
         .map_err(|e| eyre!("Failed to compile regex: {}", e))?;
 
-    pattern.captures(url)
+    pattern
+        .captures(url)
         .and_then(|caps| caps.get(5))
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| eyre!("Failed to extract video ID from URL"))
@@ -266,8 +308,7 @@ async fn fetch_video_metadata(api_key: &str, video_id: &str) -> Result<VideoMeta
         video_id, api_key
     );
 
-    let response = reqwest::get(&url).await?
-        .json::<serde_json::Value>().await?;
+    let response = reqwest::get(&url).await?.json::<serde_json::Value>().await?;
 
     if response["items"].as_array().unwrap_or(&Vec::new()).is_empty() {
         return Err(eyre!("Video metadata not found for video_id={}", video_id));
@@ -280,7 +321,8 @@ async fn fetch_video_metadata(api_key: &str, video_id: &str) -> Result<VideoMeta
         description: snippet["description"].as_str().unwrap_or_default().to_string(),
         channel: snippet["channelTitle"].as_str().unwrap_or_default().to_string(),
         published_at: snippet["publishedAt"].as_str().unwrap_or_default().to_string(),
-        tags: snippet["tags"].as_array()
+        tags: snippet["tags"]
+            .as_array()
             .unwrap_or(&Vec::new())
             .iter()
             .filter_map(|tag| tag.as_str())
@@ -290,7 +332,10 @@ async fn fetch_video_metadata(api_key: &str, video_id: &str) -> Result<VideoMeta
 }
 
 fn generate_embed_code(video_id: &str, width: usize, height: usize) -> String {
-    debug!("generate_embed_code: video_id={} width={} height={}", video_id, width, height);
+    debug!(
+        "generate_embed_code: video_id={} width={} height={}",
+        video_id, width, height
+    );
     format!(
         "<iframe width=\"{}\" height=\"{}\" src=\"https://www.youtube.com/embed/{}\" frameborder=\"0\" allowfullscreen></iframe>",
         width, height, video_id
@@ -299,16 +344,30 @@ fn generate_embed_code(video_id: &str, width: usize, height: usize) -> String {
 
 fn extract_title_and_tags(text: &str) -> (String, Vec<String>) {
     let re = Regex::new(r"(?i)\(1\)\s*|#(\w+)").unwrap();
-    let tags: Vec<String> = re.captures_iter(text)
+    let tags: Vec<String> = re
+        .captures_iter(text)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect();
     let title = re.replace_all(text, "").to_string();
     (title.trim().to_string(), tags)
 }
 
-async fn create_markdown_file(title: &str, description: &str, embed_code: &str, url: &str, author: &str, tags: &[String], vault_path: &PathBuf, folder: Option<String>, frontmatter: &Frontmatter, published: &str) -> Result<()> {
+async fn create_markdown_file(
+    title: &str,
+    description: &str,
+    embed_code: &str,
+    url: &str,
+    author: &str,
+    tags: &[String],
+    vault_path: &PathBuf,
+    folder: Option<String>,
+    frontmatter: &Frontmatter,
+    published: &str,
+) -> Result<()> {
     info!("create_markdown_file: title={} description={} embed_code={} url={} author={} tags={:?} vault_path={} folder={:?} frontmatter={:?}", title, description, embed_code, url, author, tags, vault_path.display(), folder, frontmatter);
-    let vault_path_str = vault_path.to_str().ok_or_else(|| eyre!("Failed to convert vault path to string"))?;
+    let vault_path_str = vault_path
+        .to_str()
+        .ok_or_else(|| eyre!("Failed to convert vault path to string"))?;
     let vault_path_expanded = expanduser(vault_path_str)?;
 
     let folder_path = if let Some(folder) = folder {
@@ -317,7 +376,8 @@ async fn create_markdown_file(title: &str, description: &str, embed_code: &str, 
         vault_path_expanded.clone()
     };
 
-    std::fs::create_dir_all(&folder_path).map_err(|e| eyre!("Failed to create directory: {:?} with error {}", folder_path, e))?;
+    std::fs::create_dir_all(&folder_path)
+        .map_err(|e| eyre!("Failed to create directory: {:?} with error {}", folder_path, e))?;
 
     let file_name = sanitize_filename(title);
     let file_path = folder_path.join(file_name + ".md");
@@ -328,8 +388,12 @@ async fn create_markdown_file(title: &str, description: &str, embed_code: &str, 
         .map_err(|e| eyre!("Failed to create markdown file: {:?} with error {}", file_path, e))?;
 
     let frontmatter_str = format_frontmatter(frontmatter, url, author, tags, published);
-    write!(file, "{}\n{}\n\n## Description\n{}", frontmatter_str, embed_code, description)
-        .map_err(|e| eyre!("Failed to write to markdown file: {}", e))
+    write!(
+        file,
+        "{}\n{}\n\n## Description\n{}",
+        frontmatter_str, embed_code, description
+    )
+    .map_err(|e| eyre!("Failed to write to markdown file: {}", e))
 }
 
 async fn download_webpage(url: &str) -> Result<String> {
@@ -345,23 +409,43 @@ fn extract_data_from_webpage(content: &str) -> (String, String, String, String, 
     let author_selector = Selector::parse("meta[name='author'], .author").unwrap();
     let published_selector = Selector::parse("meta[property='article:published_time']").unwrap();
     let image_selector = Selector::parse("meta[property='og:image']").unwrap();
-    
-    let title = document.select(&title_selector).next().map_or("".to_string(), |e| e.inner_html());
-    let summary = document.select(&meta_selector).next().map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
-    let author = document.select(&author_selector).next().map_or("Not specified".to_string(), |e| e.text().collect::<Vec<_>>().join(" "));
-    let published = document.select(&published_selector).next().map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
-    let image = document.select(&image_selector).next().map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
+
+    let title = document
+        .select(&title_selector)
+        .next()
+        .map_or("".to_string(), |e| e.inner_html());
+    let summary = document
+        .select(&meta_selector)
+        .next()
+        .map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
+    let author = document
+        .select(&author_selector)
+        .next()
+        .map_or("Not specified".to_string(), |e| e.text().collect::<Vec<_>>().join(" "));
+    let published = document
+        .select(&published_selector)
+        .next()
+        .map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
+    let image = document
+        .select(&image_selector)
+        .next()
+        .map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
     let tags = vec![]; //FIXME: should attempt to find tags
 
     (title, summary, author, published, image, tags)
 }
 
-async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, String, String, String, String, Vec<String>)> {
+async fn fetch_and_summarize_url_with_chatgpt(
+    url: &str,
+) -> Result<(String, String, String, String, String, Vec<String>)> {
     let content = download_webpage(url).await?;
     let (title, summary, author, published, image, tags) = extract_data_from_webpage(&content);
 
     debug!("Fetched content from URL: {}", url);
-    debug!("Extracted data - Title: {}, Summary: {}, Author: {}, Published: {}, Image: {}, Tags: {:?}", title, summary, author, published, image, tags);
+    debug!(
+        "Extracted data - Title: {}, Summary: {}, Author: {}, Published: {}, Image: {}, Tags: {:?}",
+        title, summary, author, published, image, tags
+    );
 
     let prompt = format!(
         "Please provide a JSON object with the following details about the URL: {}.
@@ -395,7 +479,8 @@ async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, Stri
         ]
     });
 
-    let response = client.post("https://api.openai.com/v1/chat/completions")
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", CHATGPT_API_KEY.as_str()))
         .header("Content-Type", "application/json")
         .json(&request_body)
@@ -412,7 +497,13 @@ async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, Stri
 
         if let Some(reply_str) = assistant_reply.as_str() {
             // Remove code block markers (```json ... ```)
-            let json_str = reply_str.trim().strip_prefix("```json").unwrap_or(reply_str).strip_suffix("```").unwrap_or(reply_str).trim();
+            let json_str = reply_str
+                .trim()
+                .strip_prefix("```json")
+                .unwrap_or(reply_str)
+                .strip_suffix("```")
+                .unwrap_or(reply_str)
+                .trim();
             debug!("Extracted JSON string: {}", json_str);
 
             match serde_json::from_str::<serde_json::Value>(json_str) {
@@ -420,7 +511,10 @@ async fn fetch_and_summarize_url_with_chatgpt(url: &str) -> Result<(String, Stri
                     debug!("Parsed JSON from assistant reply: {:?}", parsed);
 
                     let (current_date, _, _) = today();
-                    let title = parsed["title"].as_str().unwrap_or(&format!("No Title {}", current_date)).to_string();
+                    let title = parsed["title"]
+                        .as_str()
+                        .unwrap_or(&format!("No Title {}", current_date))
+                        .to_string();
                     let summary = parsed["summary"].as_str().unwrap_or_default().to_string();
                     let author = parsed["author"].as_str().unwrap_or_default().to_string();
                     let published = parsed["published"].as_str().unwrap_or_default().to_string();
@@ -456,8 +550,18 @@ fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> Stri
     )
 }
 
-async fn handle_shorts_url(url: &str, title: &str, folder: Option<String>, width: usize, height: usize, config: &Config) -> Result<()> {
-    info!("handle_shorts_url: url={}, title={} folder={:?}, width={} height={}, config={:?}", url, title, folder, width, height, config);
+async fn handle_shorts_url(
+    url: &str,
+    title: &str,
+    folder: Option<String>,
+    width: usize,
+    height: usize,
+    config: &Config,
+) -> Result<()> {
+    info!(
+        "handle_shorts_url: url={}, title={} folder={:?}, width={} height={}, config={:?}",
+        url, title, folder, width, height, config
+    );
     let video_id = extract_video_id(url)?;
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
@@ -465,11 +569,7 @@ async fn handle_shorts_url(url: &str, title: &str, folder: Option<String>, width
     let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title);
     let (title, tags) = extract_title_and_tags(title);
 
-    let final_title = if title.is_empty() {
-        metadata_title
-    } else {
-        title
-    };
+    let final_title = if title.is_empty() { metadata_title } else { title };
 
     let mut combined_tags: HashSet<String> = HashSet::new();
     combined_tags.extend(tags);
@@ -487,12 +587,23 @@ async fn handle_shorts_url(url: &str, title: &str, folder: Option<String>, width
         &config.vault,
         folder,
         &config.frontmatter,
-        &metadata.published_at
-    ).await
+        &metadata.published_at,
+    )
+    .await
 }
 
-async fn handle_youtube_url(url: &str, title: &str, folder: Option<String>, width: usize, height: usize, config: &Config) -> Result<()> {
-    info!("handle_youtube_url: url={}, title={} folder={:?}, width={} height={}, config={:?}", url, title, folder, width, height, config);
+async fn handle_youtube_url(
+    url: &str,
+    title: &str,
+    folder: Option<String>,
+    width: usize,
+    height: usize,
+    config: &Config,
+) -> Result<()> {
+    info!(
+        "handle_youtube_url: url={}, title={} folder={:?}, width={} height={}, config={:?}",
+        url, title, folder, width, height, config
+    );
     let video_id = extract_video_id(url)?;
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
@@ -500,11 +611,7 @@ async fn handle_youtube_url(url: &str, title: &str, folder: Option<String>, widt
     let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title);
     let (title, tags) = extract_title_and_tags(title);
 
-    let final_title = if title.is_empty() {
-        metadata_title
-    } else {
-        title
-    };
+    let final_title = if title.is_empty() { metadata_title } else { title };
 
     let mut combined_tags: HashSet<String> = HashSet::new();
     combined_tags.extend(tags);
@@ -522,13 +629,25 @@ async fn handle_youtube_url(url: &str, title: &str, folder: Option<String>, widt
         &config.vault,
         folder,
         &config.frontmatter,
-        &metadata.published_at
-    ).await
+        &metadata.published_at,
+    )
+    .await
 }
 
-async fn handle_weblink_url(url: &str, title: &str, folder: Option<String>, width: usize, height: usize, config: &Config) -> Result<()> {
-    info!("handle_weblink_url: url={}, title={} folder={:?}, width={} height={}, config={:?}", url, title, folder, width, height, config);
-    let (fetched_title, summary, author, published, image, fetched_tags) = fetch_and_summarize_url_with_chatgpt(url).await?;
+async fn handle_weblink_url(
+    url: &str,
+    title: &str,
+    folder: Option<String>,
+    width: usize,
+    height: usize,
+    config: &Config,
+) -> Result<()> {
+    info!(
+        "handle_weblink_url: url={}, title={} folder={:?}, width={} height={}, config={:?}",
+        url, title, folder, width, height, config
+    );
+    let (fetched_title, summary, author, published, image, fetched_tags) =
+        fetch_and_summarize_url_with_chatgpt(url).await?;
     let embed_code = if !image.is_empty() {
         generate_image_embed_code(&image, width, height)
     } else {
@@ -538,11 +657,7 @@ async fn handle_weblink_url(url: &str, title: &str, folder: Option<String>, widt
     let (metadata_title, metadata_tags) = extract_title_and_tags(&fetched_title);
     let (title, tags) = extract_title_and_tags(title);
 
-    let final_title = if title.is_empty() {
-        metadata_title
-    } else {
-        title
-    };
+    let final_title = if title.is_empty() { metadata_title } else { title };
 
     let mut combined_tags: HashSet<String> = HashSet::new();
     combined_tags.extend(tags);
@@ -560,16 +675,35 @@ async fn handle_weblink_url(url: &str, title: &str, folder: Option<String>, widt
         &config.vault,
         folder,
         &config.frontmatter,
-        &published
-    ).await
+        &published,
+    )
+    .await
+}
+
+fn remove_utm_source(url: &str) -> Result<String> {
+    let mut parsed_url = Url::parse(url).map_err(|e| eyre!("Failed to parse URL: {}", e))?;
+    let mut query_pairs = parsed_url.query_pairs().into_owned().collect::<Vec<(String, String)>>();
+    query_pairs.retain(|(key, _)| key != "utm_source");
+    parsed_url.query_pairs_mut().clear().extend_pairs(query_pairs);
+    Ok(parsed_url.into())
 }
 
 async fn handle_url(url: &str, title: &str, folder: Option<String>, config: &Config) -> Result<()> {
-    debug!("handle_url: url={} title={} folder={:?} config={:?}", url, title, folder, config);
-    match LinkType::from_url(url, config)? {
-        LinkType::Shorts(url, default_folder, width, height) => handle_shorts_url(&url, title, folder.or(Some(default_folder)), width, height, config).await,
-        LinkType::YouTube(url, default_folder, width, height) => handle_youtube_url(&url, title, folder.or(Some(default_folder)), width, height, config).await,
-        LinkType::WebLink(url, default_folder, width, height) => handle_weblink_url(&url, title, folder.or(Some(default_folder)), width, height, config).await,
+    debug!(
+        "handle_url: url={} title={} folder={:?} config={:?}",
+        url, title, folder, config
+    );
+    let url = remove_utm_source(url)?;
+    match LinkType::from_url(&url, config)? {
+        LinkType::Shorts(url, default_folder, width, height) => {
+            handle_shorts_url(&url, title, folder.or(Some(default_folder)), width, height, config).await
+        }
+        LinkType::YouTube(url, default_folder, width, height) => {
+            handle_youtube_url(&url, title, folder.or(Some(default_folder)), width, height, config).await
+        }
+        LinkType::WebLink(url, default_folder, width, height) => {
+            handle_weblink_url(&url, title, folder.or(Some(default_folder)), width, height, config).await
+        }
     }
 }
 
@@ -608,13 +742,14 @@ fn init_logger() {
 
 fn load_config(config_path: PathBuf) -> Result<Config> {
     debug!("load_config: config_path={}", config_path.display());
-    let config_path_str = config_path.to_str()
+    let config_path_str = config_path
+        .to_str()
         .ok_or_else(|| eyre!("Failed to convert config path to string"))?;
     let config_path_expanded = expanduser(config_path_str)?;
-    let config_str = std::fs::read_to_string(config_path_expanded)
-        .map_err(|e| eyre!("Failed to read config file: {}", e))?;
-    let mut config: Config = serde_yaml::from_str(&config_str)
-        .map_err(|e| eyre!("Failed to parse config file: {}", e))?;
+    let config_str =
+        std::fs::read_to_string(config_path_expanded).map_err(|e| eyre!("Failed to read config file: {}", e))?;
+    let mut config: Config =
+        serde_yaml::from_str(&config_str).map_err(|e| eyre!("Failed to parse config file: {}", e))?;
     config.frontmatter = Config::complete_frontmatter(config.frontmatter);
     Ok(config)
 }
@@ -646,9 +781,7 @@ async fn main() -> Result<()> {
     .workers(cli.workers);
 
     info!("Binding server to 0.0.0.0:{}", cli.port);
-    server.bind(("0.0.0.0", cli.port))?
-        .run()
-        .await?;
+    server.bind(("0.0.0.0", cli.port))?.run().await?;
 
     Ok(())
 }
@@ -699,10 +832,7 @@ mod tests {
     async fn test_weblink_identification() {
         let config = load_test_config();
 
-        let weblink_urls = vec![
-            "https://parrot.ai/",
-            "https://pdfgpt.io/",
-        ];
+        let weblink_urls = vec!["https://parrot.ai/", "https://pdfgpt.io/"];
 
         for url in weblink_urls {
             let link_type = LinkType::from_url(url, &config).expect("Failed to identify link type");
@@ -715,7 +845,10 @@ mod tests {
         let config = load_test_config();
         let invalid_shorts_url = "https://www.youtube.com/notshorts/gGrqPbb6fuM";
         let link_type = LinkType::from_url(invalid_shorts_url, &config).expect("Failed to identify link type");
-        assert!(matches!(link_type, LinkType::WebLink(..)), "Expected a WebLink for invalid Shorts URL format");
+        assert!(
+            matches!(link_type, LinkType::WebLink(..)),
+            "Expected a WebLink for invalid Shorts URL format"
+        );
     }
 
     #[tokio::test]
@@ -723,15 +856,24 @@ mod tests {
         let config = load_test_config();
         let invalid_youtube_url = "https://www.notyoutube.com/watch?v=y4evLICF8kk";
         let link_type = LinkType::from_url(invalid_youtube_url, &config).expect("Failed to identify link type");
-        assert!(matches!(link_type, LinkType::WebLink(..)), "Expected a WebLink for invalid YouTube URL format");
+        assert!(
+            matches!(link_type, LinkType::WebLink(..)),
+            "Expected a WebLink for invalid YouTube URL format"
+        );
     }
 
     #[test]
     fn test_generate_embed_code_non_integer() {
         let video_id = "y4evLICF8kk";
         let embed_code = generate_embed_code(video_id, 0, 0);
-        assert!(embed_code.contains("width=\"0\""), "Embed code should contain width=\"0\"");
-        assert!(embed_code.contains("height=\"0\""), "Embed code should contain height=\"0\"");
+        assert!(
+            embed_code.contains("width=\"0\""),
+            "Embed code should contain width=\"0\""
+        );
+        assert!(
+            embed_code.contains("height=\"0\""),
+            "Embed code should contain height=\"0\""
+        );
     }
 
     #[tokio::test]
@@ -754,10 +896,14 @@ mod tests {
             &config.vault,
             "test_folder",
             &config.frontmatter,
-            "published_date"
-        ).await;
+            "published_date",
+        )
+        .await;
 
-        assert!(result.is_ok(), "Failed to create markdown file with special characters in title");
+        assert!(
+            result.is_ok(),
+            "Failed to create markdown file with special characters in title"
+        );
     }
 
     #[test]
