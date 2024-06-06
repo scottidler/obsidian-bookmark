@@ -162,9 +162,9 @@ impl LinkType {
     }
 }
 
-fn expanduser<T: AsRef<str>>(path: T) -> Result<PathBuf> {
+fn expanduser<T: AsRef<str>>(path: T) -> PathBuf {
     let expanded_path_str = shellexpand::tilde(path.as_ref());
-    Ok(PathBuf::from(expanded_path_str.into_owned()))
+    PathBuf::from(expanded_path_str.into_owned())
 }
 
 fn today() -> (String, String, String) {
@@ -351,7 +351,7 @@ async fn create_markdown_file(
     let vault_path_str = vault_path
         .to_str()
         .ok_or_else(|| eyre!("Failed to convert vault path to string"))?;
-    let vault_path_expanded = expanduser(vault_path_str)?;
+    let vault_path_expanded = expanduser(vault_path_str);
 
     let folder_path = if let Some(folder) = folder {
         vault_path_expanded.join(folder)
@@ -725,7 +725,7 @@ fn load_config(config_path: &Path) -> Result<Config> {
     let config_path_str = config_path
         .to_str()
         .ok_or_else(|| eyre!("Failed to convert config path to string"))?;
-    let config_path_expanded = expanduser(config_path_str)?;
+    let config_path_expanded = expanduser(config_path_str);
     let config_str =
         std::fs::read_to_string(config_path_expanded).map_err(|e| eyre!("Failed to read config file: {}", e))?;
     let mut config: Config =
