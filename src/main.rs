@@ -648,10 +648,10 @@ async fn handle_weblink_url(
     );
     let (fetched_title, summary, author, published, image, fetched_tags) =
         fetch_and_summarize_url_with_chatgpt(url).await?;
-    let embed_code = if !image.is_empty() {
-        generate_image_embed_code(&image, width, height)
-    } else {
+    let embed_code = if image.is_empty() {
         String::new()
+    } else {
+        generate_image_embed_code(&image, width, height)
     };
 
     let (metadata_title, metadata_tags) = extract_title_and_tags(&fetched_title);
