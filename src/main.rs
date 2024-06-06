@@ -325,6 +325,12 @@ fn generate_embed_code(video_id: &str, width: usize, height: usize) -> String {
     )
 }
 
+fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> String {
+    format!(
+        "<img src=\"{img_url}\" width=\"{width}\" height=\"{height}\" alt=\"Image\" />"
+    )
+}
+
 fn extract_title_and_tags(text: &str) -> Result<(String, Vec<String>)> {
     let re = Regex::new(r"(?i)\(1\)\s*|#(\w+)").map_err(|e| eyre!("Failed to compile regex: {}", e))?;
     let tags: Vec<String> = re
@@ -476,58 +482,55 @@ async fn fetch_and_summarize_url_with_chatgpt(
 
         debug!("Assistant reply: {:?}", assistant_reply);
 
-        if let Some(reply_str) = assistant_reply.as_str() {
-            // Remove code block markers (```json ... ```)
-            let json_str = reply_str
-                .trim()
-                .strip_prefix("```json")
-                .unwrap_or(reply_str)
-                .strip_suffix("```")
-                .unwrap_or(reply_str)
-                .trim();
-            debug!("Extracted JSON string: {}", json_str);
+        assistant_reply.as_str().map_or_else(
+            || {
+                error!("Failed to parse ChatGPT response: {:?}", response_body);
+                Err(eyre!("Failed to parse ChatGPT response"))
+            },
+            |reply_str| {
+                // Remove code block markers (```json ... ```)
+                let json_str = reply_str
+                    .trim()
+                    .strip_prefix("```json")
+                    .unwrap_or(reply_str)
+                    .strip_suffix("```")
+                    .unwrap_or(reply_str)
+                    .trim();
+                debug!("Extracted JSON string: {}", json_str);
 
-            match serde_json::from_str::<serde_json::Value>(json_str) {
-                Ok(parsed) => {
-                    debug!("Parsed JSON from assistant reply: {:?}", parsed);
+                match serde_json::from_str::<serde_json::Value>(json_str) {
+                    Ok(parsed) => {
+                        debug!("Parsed JSON from assistant reply: {:?}", parsed);
 
-                    let (current_date, _, _) = today();
-                    let title = parsed["title"]
-                        .as_str()
-                        .unwrap_or(&format!("No Title {current_date}"))
-                        .to_string();
-                    let summary = parsed["summary"].as_str().unwrap_or_default().to_string();
-                    let author = parsed["author"].as_str().unwrap_or_default().to_string();
-                    let published = parsed["published"].as_str().unwrap_or_default().to_string();
-                    let image = parsed["main_image_url"].as_str().unwrap_or_default().to_string();
-                    let tags = parsed["tags"].as_array().map_or_else(Vec::new, |arr| {
-                        arr.iter().filter_map(|tag| tag.as_str().map(String::from)).collect()
-                    });
+                        let (current_date, _, _) = today();
+                        let title = parsed["title"]
+                            .as_str()
+                            .unwrap_or(&format!("No Title {current_date}"))
+                            .to_string();
+                        let summary = parsed["summary"].as_str().unwrap_or_default().to_string();
+                        let author = parsed["author"].as_str().unwrap_or_default().to_string();
+                        let published = parsed["published"].as_str().unwrap_or_default().to_string();
+                        let image = parsed["main_image_url"].as_str().unwrap_or_default().to_string();
+                        let tags = parsed["tags"].as_array().map_or_else(Vec::new, |arr| {
+                            arr.iter().filter_map(|tag| tag.as_str().map(String::from)).collect()
+                        });
 
-                    debug!("Final extracted data - Title: {}, Summary: {}, Author: {}, Published: {}, Image: {}, Tags: {:?}", title, summary, author, published, image, tags);
+                        debug!("Final extracted data - Title: {}, Summary: {}, Author: {}, Published: {}, Image: {}, Tags: {:?}", title, summary, author, published, image, tags);
 
-                    Ok((title, summary, author, published, image, tags))
+                        Ok((title, summary, author, published, image, tags))
+                    }
+                    Err(e) => {
+                        error!("Failed to parse extracted JSON string: {}", e);
+                        Err(eyre!("Failed to parse ChatGPT response"))
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to parse extracted JSON string: {}", e);
-                    Err(eyre!("Failed to parse ChatGPT response"))
-                }
-            }
-        } else {
-            error!("Failed to parse ChatGPT response: {:?}", response_body);
-            Err(eyre!("Failed to parse ChatGPT response"))
-        }
+            },
+        )
     } else {
         let error_text = response.text().await?;
         error!("Error response from ChatGPT: {}", error_text);
         Err(eyre!("Error: {}", error_text))
     }
-}
-
-fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> String {
-    format!(
-        "<img src=\"{img_url}\" width=\"{width}\" height=\"{height}\" alt=\"Image\" />"
-    )
 }
 
 async fn handle_shorts_url(
