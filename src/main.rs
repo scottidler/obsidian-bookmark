@@ -782,20 +782,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_youtube_shorts_identification() {
+    async fn test_youtube_shorts_identification() -> Result<()> {
         let config = load_test_config();
         let shorts_urls = vec![
             "https://www.youtube.com/shorts/gGrqPbb6fuM",
             "https://www.youtube.com/shorts/FjkS5rjNq-A",
         ];
         for url in shorts_urls {
-            let link_type = LinkType::from_url(url, &config).expect("Failed to identify link type");
+            let link_type = LinkType::from_url(url, &config)?;
             assert!(matches!(link_type, LinkType::Shorts(..)));
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_youtube_url_identification() {
+    async fn test_youtube_url_identification() -> Result<()> {
         let config = load_test_config();
 
         let urls = vec![
@@ -806,43 +807,47 @@ mod tests {
         ];
 
         for url in urls {
-            let link_type = LinkType::from_url(url, &config).expect("Failed to identify link type");
+            let link_type = LinkType::from_url(url, &config)?;
             assert!(matches!(link_type, LinkType::YouTube(..)));
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_weblink_identification() {
+    async fn test_weblink_identification() -> Result<()> {
         let config = load_test_config();
 
         let weblink_urls = vec!["https://parrot.ai/", "https://pdfgpt.io/"];
 
         for url in weblink_urls {
-            let link_type = LinkType::from_url(url, &config).expect("Failed to identify link type");
+            let link_type = LinkType::from_url(url, &config)?;
             assert!(matches!(link_type, LinkType::WebLink(..)));
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_invalid_shorts_url_format() {
+    async fn test_invalid_shorts_url_format() -> Result<()> {
         let config = load_test_config();
         let invalid_shorts_url = "https://www.youtube.com/notshorts/gGrqPbb6fuM";
-        let link_type = LinkType::from_url(invalid_shorts_url, &config).expect("Failed to identify link type");
+        let link_type = LinkType::from_url(invalid_shorts_url, &config)?;
         assert!(
             matches!(link_type, LinkType::WebLink(..)),
             "Expected a WebLink for invalid Shorts URL format"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_invalid_youtube_url_format() {
+    async fn test_invalid_youtube_url_format() -> Result<()> {
         let config = load_test_config();
         let invalid_youtube_url = "https://www.notyoutube.com/watch?v=y4evLICF8kk";
-        let link_type = LinkType::from_url(invalid_youtube_url, &config).expect("Failed to identify link type");
+        let link_type = LinkType::from_url(invalid_youtube_url, &config)?;
         assert!(
             matches!(link_type, LinkType::WebLink(..)),
             "Expected a WebLink for invalid YouTube URL format"
         );
+        Ok(())
     }
 
     #[test]
@@ -860,7 +865,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_markdown_special_characters() {
+    async fn test_create_markdown_special_characters() -> Result<()> {
         let title = "Test: Special/Characters?*";
         let description = "A test video.";
         let embed_code = "<iframe...></iframe>";
@@ -877,7 +882,7 @@ mod tests {
             author,
             &tags,
             &config.vault,
-            "test_folder",
+            Some("test_folder".to_string()),
             &config.frontmatter,
             "published_date",
         )
@@ -887,21 +892,24 @@ mod tests {
             result.is_ok(),
             "Failed to create markdown file with special characters in title"
         );
+        Ok(())
     }
 
     #[test]
-    fn test_extract_title_and_tags() {
+    fn test_extract_title_and_tags() -> Result<()> {
         let text = "(1) Test title with #tag1 and #tag2";
         let (title, tags) = extract_title_and_tags(text)?;
         assert_eq!(title, "Test title with and");
         assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
+        Ok(())
     }
 
     #[test]
-    fn test_extract_title_and_tags_no_prefix() {
+    fn test_extract_title_and_tags_no_prefix() -> Result<()> {
         let text = "Test title with #tag1 and #tag2";
         let (title, tags) = extract_title_and_tags(text)?;
         assert_eq!(title, "Test title with and");
         assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
+        Ok(())
     }
 }
