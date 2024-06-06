@@ -264,14 +264,14 @@ fn sanitize_tag(tag: &str) -> String {
         .to_lowercase()
 }
 
-fn sanitize_filename(title: &str) -> String {
+fn sanitize_filename(title: &str) -> Result<String> {
     debug!("sanitize_filename: title={}", title);
-    let re = Regex::new(r"\s{2,}").unwrap();
+    let re = Regex::new(r"\s{2,}").map_err(|e| eyre!("Failed to compile regex: {}", e))?;
     let sanitized_title = title
         .chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-')
         .collect::<String>();
-    re.replace_all(&sanitized_title, " ").to_string()
+    Ok(re.replace_all(&sanitized_title, " ").to_string())
 }
 
 fn extract_video_id(url: &str) -> Result<String> {
@@ -325,14 +325,14 @@ fn generate_embed_code(video_id: &str, width: usize, height: usize) -> String {
     )
 }
 
-fn extract_title_and_tags(text: &str) -> (String, Vec<String>) {
-    let re = Regex::new(r"(?i)\(1\)\s*|#(\w+)").unwrap();
+fn extract_title_and_tags(text: &str) -> Result<(String, Vec<String>)> {
+    let re = Regex::new(r"(?i)\(1\)\s*|#(\w+)").map_err(|e| eyre!("Failed to compile regex: {}", e))?;
     let tags: Vec<String> = re
         .captures_iter(text)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect();
     let title = re.replace_all(text, "").to_string();
-    (title.trim().to_string(), tags)
+    Ok((title.trim().to_string(), tags))
 }
 
 async fn create_markdown_file(
@@ -362,7 +362,7 @@ async fn create_markdown_file(
     std::fs::create_dir_all(&folder_path)
         .map_err(|e| eyre!("Failed to create directory: {:?} with error {}", folder_path, e))?;
 
-    let file_name = sanitize_filename(title);
+    let file_name = sanitize_filename(title)?;
     let file_path = folder_path.join(file_name + ".md");
 
     info!("file_path={:?}", file_path);
@@ -384,13 +384,13 @@ async fn download_webpage(url: &str) -> Result<String> {
     Ok(content)
 }
 
-fn extract_data_from_webpage(content: &str) -> (String, String, String, String, String, Vec<String>) {
+fn extract_data_from_webpage(content: &str) -> Result<(String, String, String, String, String, Vec<String>)> {
     let document = Html::parse_document(content);
-    let title_selector = Selector::parse("title").unwrap();
-    let meta_selector = Selector::parse("meta[name='description']").unwrap();
-    let author_selector = Selector::parse("meta[name='author'], .author").unwrap();
-    let published_selector = Selector::parse("meta[property='article:published_time']").unwrap();
-    let image_selector = Selector::parse("meta[property='og:image']").unwrap();
+    let title_selector = Selector::parse("title").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
+    let meta_selector = Selector::parse("meta[name='description']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
+    let author_selector = Selector::parse("meta[name='author'], .author").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
+    let published_selector = Selector::parse("meta[property='article:published_time']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
+    let image_selector = Selector::parse("meta[property='og:image']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
 
     let title = document
         .select(&title_selector)
@@ -414,14 +414,14 @@ fn extract_data_from_webpage(content: &str) -> (String, String, String, String, 
         .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
     let tags = vec![]; //FIXME: should attempt to find tags
 
-    (title, summary, author, published, image, tags)
+    Ok((title, summary, author, published, image, tags))
 }
 
 async fn fetch_and_summarize_url_with_chatgpt(
     url: &str,
 ) -> Result<(String, String, String, String, String, Vec<String>)> {
     let content = download_webpage(url).await?;
-    let (title, summary, author, published, image, tags) = extract_data_from_webpage(&content);
+    let (title, summary, author, published, image, tags) = extract_data_from_webpage(&content)?;
 
     debug!("Fetched content from URL: {}", url);
     debug!(
@@ -546,8 +546,8 @@ async fn handle_shorts_url(
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
 
-    let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title);
-    let (title, tags) = extract_title_and_tags(title);
+    let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title)?;
+    let (title, tags) = extract_title_and_tags(title)?;
 
     let final_title = if title.is_empty() { metadata_title } else { title };
 
@@ -588,8 +588,8 @@ async fn handle_youtube_url(
     let metadata = fetch_video_metadata(&YOUTUBE_API_KEY, &video_id).await?;
     let embed_code = generate_embed_code(&video_id, width, height);
 
-    let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title);
-    let (title, tags) = extract_title_and_tags(title);
+    let (metadata_title, metadata_tags) = extract_title_and_tags(&metadata.title)?;
+    let (title, tags) = extract_title_and_tags(title)?;
 
     let final_title = if title.is_empty() { metadata_title } else { title };
 
@@ -634,8 +634,8 @@ async fn handle_weblink_url(
         generate_image_embed_code(&image, width, height)
     };
 
-    let (metadata_title, metadata_tags) = extract_title_and_tags(&fetched_title);
-    let (title, tags) = extract_title_and_tags(title);
+    let (metadata_title, metadata_tags) = extract_title_and_tags(&fetched_title)?;
+    let (title, tags) = extract_title_and_tags(title)?;
 
     let final_title = if title.is_empty() { metadata_title } else { title };
 
