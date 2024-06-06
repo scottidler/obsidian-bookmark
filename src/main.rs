@@ -392,33 +392,79 @@ async fn download_webpage(url: &str) -> Result<String> {
 
 fn extract_data_from_webpage(content: &str) -> Result<(String, String, String, String, String, Vec<String>)> {
     let document = Html::parse_document(content);
-    let title_selector = Selector::parse("title").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
-    let meta_selector = Selector::parse("meta[name='description']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
-    let author_selector = Selector::parse("meta[name='author'], .author").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
-    let published_selector = Selector::parse("meta[property='article:published_time']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
-    let image_selector = Selector::parse("meta[property='og:image']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
 
+    let title_selector = Selector::parse("title").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
     let title = document
         .select(&title_selector)
         .next()
         .map_or(String::new(), |e| e.inner_html());
+
+    let meta_selector = Selector::parse("meta[name='description']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
     let summary = document
         .select(&meta_selector)
         .next()
         .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
-    let author = document
-        .select(&author_selector)
-        .next()
-        .map_or("Not specified".to_string(), |e| e.text().collect::<Vec<_>>().join(" "));
-    let published = document
-        .select(&published_selector)
-        .next()
-        .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
+
+    let author_selectors = [
+        Selector::parse("meta[name='author']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse("meta[property='article:author']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse(".author").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse("[itemprop='author']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+    ];
+    let mut author = "Not specified".to_string();
+    for selector in &author_selectors {
+        if let Some(element) = document.select(selector).next() {
+            author = element.text().collect::<Vec<_>>().join(" ");
+            break;
+        }
+    }
+
+    let published_selectors = [
+        Selector::parse("meta[property='article:published_time']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse("meta[name='publication_date']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse("time[datetime]").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse("[itemprop='datePublished']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+    ];
+    let mut published = String::new();
+    for selector in &published_selectors {
+        if let Some(element) = document.select(selector).next() {
+            published = element.value().attr("content").unwrap_or("").to_string();
+            if published.is_empty() {
+                published = element.text().collect::<Vec<_>>().join(" ");
+            }
+            break;
+        }
+    }
+
+    let image_selector = Selector::parse("meta[property='og:image']").map_err(|e| eyre!("Failed to compile selector: {}", e))?;
     let image = document
         .select(&image_selector)
         .next()
         .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
-    let tags = vec![]; //FIXME: should attempt to find tags
+
+    let tag_selectors = [
+        Selector::parse("meta[name='keywords']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse(".tags").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse(".tag").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse(".keywords").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+        Selector::parse("[itemprop='keywords']").map_err(|e| eyre!("Failed to compile selector: {}", e))?,
+    ];
+
+    let mut tags = Vec::new();
+
+    for selector in &tag_selectors {
+        if let Some(element) = document.select(selector).next() {
+            if let Some(content) = element.value().attr("content") {
+                tags.extend(content.split(',').map(|tag| tag.trim().to_string()));
+            } else {
+                tags.extend(element.text().map(|tag| tag.trim().to_string()));
+            }
+        }
+    }
+
+    tags = tags.into_iter().filter(|tag| !tag.is_empty()).collect();
+    tags.sort();
+    tags.dedup();
 
     Ok((title, summary, author, published, image, tags))
 }
