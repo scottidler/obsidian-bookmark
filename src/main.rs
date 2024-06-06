@@ -720,7 +720,7 @@ fn init_logger() {
     builder.init();
 }
 
-fn load_config(config_path: PathBuf) -> Result<Config> {
+fn load_config(config_path: &Path) -> Result<Config> {
     debug!("load_config: config_path={}", config_path.display());
     let config_path_str = config_path
         .to_str()
@@ -742,7 +742,7 @@ async fn main() -> Result<()> {
     info!("Starting server with POST endpoint: /process_bookmark");
     info!("Starting server on port: {}", cli.port);
 
-    let config = load_config(cli.config)?;
+    let config = load_config(&cli.config)?;
 
     let server = HttpServer::new(move || {
         info!("Setting up the Actix app with CORS and services");
