@@ -9,7 +9,6 @@ use eyre::{eyre, Result};
 use lazy_static::lazy_static;
 use log::{debug, error, info, LevelFilter};
 use regex::Regex;
-use reqwest;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -17,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::Write;
 use std::path::PathBuf;
-use tokio;
 use url::Url;
 
 lazy_static! {
@@ -90,14 +88,14 @@ struct Frontmatter {
 
 impl Default for Frontmatter {
     fn default() -> Self {
-        Frontmatter {
-            date: "".to_string(),
-            day: "".to_string(),
-            time: "".to_string(),
+        Self {
+            date: String::new(),
+            day: String::new(),
+            time: String::new(),
             tags: vec![],
-            url: "".to_string(),
-            author: "".to_string(),
-            published: "".to_string(),
+            url: String::new(),
+            author: String::new(),
+            published: String::new(),
         }
     }
 }
@@ -149,7 +147,7 @@ enum LinkType {
 }
 
 impl LinkType {
-    fn from_url(url: &str, config: &Config) -> Result<LinkType> {
+    fn from_url(url: &str, config: &Config) -> Result<Self> {
         debug!("LinkType::from_url: url={} config={:?}", url, config);
         let mut default_link = None;
 
@@ -158,13 +156,13 @@ impl LinkType {
             if regex.is_match(url) {
                 let (width, height) = get_resolution(&link.name, config)?;
                 if link.name == "default" {
-                    default_link = Some(LinkType::WebLink(url.to_string(), link.folder.clone(), width, height));
+                    default_link = Some(Self::WebLink(url.to_string(), link.folder.clone(), width, height));
                     continue;
                 }
                 return Ok(match link.name.as_str() {
-                    "shorts" => LinkType::Shorts(url.to_string(), link.folder.clone(), width, height),
-                    "youtube" => LinkType::YouTube(url.to_string(), link.folder.clone(), width, height),
-                    _ => LinkType::WebLink(url.to_string(), link.folder.clone(), width, height),
+                    "shorts" => Self::Shorts(url.to_string(), link.folder.clone(), width, height),
+                    "youtube" => Self::YouTube(url.to_string(), link.folder.clone(), width, height),
+                    _ => Self::WebLink(url.to_string(), link.folder.clone(), width, height),
                 });
             }
         }
@@ -253,8 +251,8 @@ fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: 
         frontmatter_str += &format!("  - {}\n", sanitize_tag(tag));
     }
 
-    frontmatter_str += &format!("url: {}\n", url);
-    frontmatter_str += &format!("author: {}\n", author);
+    frontmatter_str += &format!("url: {url}\n");
+    frontmatter_str += &format!("author: {author}\n");
     frontmatter_str += &format!(
         "published: {}\n",
         if frontmatter.published.is_empty() {
@@ -271,7 +269,7 @@ fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: 
 
 fn sanitize_tag(tag: &str) -> String {
     debug!("sanitize_tag: tag={}", tag);
-    tag.replace("'", "")
+    tag.replace('\'', "")
         .chars()
         .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { '-' })
         .collect::<String>()
@@ -304,8 +302,7 @@ fn extract_video_id(url: &str) -> Result<String> {
 async fn fetch_video_metadata(api_key: &str, video_id: &str) -> Result<VideoMetadata> {
     debug!("fetch_video_metadata: api_key={} video_id={}", api_key, video_id);
     let url = format!(
-        "https://www.googleapis.com/youtube/v3/videos?id={}&part=snippet&key={}",
-        video_id, api_key
+        "https://www.googleapis.com/youtube/v3/videos?id={video_id}&part=snippet&key={api_key}"
     );
 
     let response = reqwest::get(&url).await?.json::<serde_json::Value>().await?;
@@ -337,8 +334,7 @@ fn generate_embed_code(video_id: &str, width: usize, height: usize) -> String {
         video_id, width, height
     );
     format!(
-        "<iframe width=\"{}\" height=\"{}\" src=\"https://www.youtube.com/embed/{}\" frameborder=\"0\" allowfullscreen></iframe>",
-        width, height, video_id
+        "<iframe width=\"{width}\" height=\"{height}\" src=\"https://www.youtube.com/embed/{video_id}\" frameborder=\"0\" allowfullscreen></iframe>"
     )
 }
 
@@ -373,7 +369,7 @@ async fn create_markdown_file(
     let folder_path = if let Some(folder) = folder {
         vault_path_expanded.join(folder)
     } else {
-        vault_path_expanded.clone()
+        vault_path_expanded
     };
 
     std::fs::create_dir_all(&folder_path)
@@ -390,8 +386,7 @@ async fn create_markdown_file(
     let frontmatter_str = format_frontmatter(frontmatter, url, author, tags, published);
     write!(
         file,
-        "{}\n{}\n\n## Description\n{}",
-        frontmatter_str, embed_code, description
+        "{frontmatter_str}\n{embed_code}\n\n## Description\n{description}"
     )
     .map_err(|e| eyre!("Failed to write to markdown file: {}", e))
 }
@@ -413,11 +408,11 @@ fn extract_data_from_webpage(content: &str) -> (String, String, String, String, 
     let title = document
         .select(&title_selector)
         .next()
-        .map_or("".to_string(), |e| e.inner_html());
+        .map_or(String::new(), |e| e.inner_html());
     let summary = document
         .select(&meta_selector)
         .next()
-        .map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
+        .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
     let author = document
         .select(&author_selector)
         .next()
@@ -425,11 +420,11 @@ fn extract_data_from_webpage(content: &str) -> (String, String, String, String, 
     let published = document
         .select(&published_selector)
         .next()
-        .map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
+        .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
     let image = document
         .select(&image_selector)
         .next()
-        .map_or("".to_string(), |e| e.value().attr("content").unwrap_or("").to_string());
+        .map_or(String::new(), |e| e.value().attr("content").unwrap_or("").to_string());
     let tags = vec![]; //FIXME: should attempt to find tags
 
     (title, summary, author, published, image, tags)
@@ -448,13 +443,13 @@ async fn fetch_and_summarize_url_with_chatgpt(
     );
 
     let prompt = format!(
-        "Please provide a JSON object with the following details about the URL: {}.
-        - Title: {}
-        - Summary: {}
-        - Author: {}
-        - Published: {}
-        - Main Image URL: {}
-        - Tags: {:?}
+        "Please provide a JSON object with the following details about the URL: {url}.
+        - Title: {title}
+        - Summary: {summary}
+        - Author: {author}
+        - Published: {published}
+        - Main Image URL: {image}
+        - Tags: {tags:?}
 
         The JSON object should include:
         - 'title': The title of the article
@@ -464,8 +459,7 @@ async fn fetch_and_summarize_url_with_chatgpt(
         - 'main_image_url': The main image URL of the article
         - 'tags': Relevant tags for the article
 
-        URL: {}",
-        url, title, summary, author, published, image, tags, url
+        URL: {url}"
     );
 
     debug!("Prompt for ChatGPT: {}", prompt);
@@ -513,7 +507,7 @@ async fn fetch_and_summarize_url_with_chatgpt(
                     let (current_date, _, _) = today();
                     let title = parsed["title"]
                         .as_str()
-                        .unwrap_or(&format!("No Title {}", current_date))
+                        .unwrap_or(&format!("No Title {current_date}"))
                         .to_string();
                     let summary = parsed["summary"].as_str().unwrap_or_default().to_string();
                     let author = parsed["author"].as_str().unwrap_or_default().to_string();
@@ -545,8 +539,7 @@ async fn fetch_and_summarize_url_with_chatgpt(
 
 fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> String {
     format!(
-        "<img src=\"{}\" width=\"{}\" height=\"{}\" alt=\"Image\" />",
-        img_url, width, height
+        "<img src=\"{img_url}\" width=\"{width}\" height=\"{height}\" alt=\"Image\" />"
     )
 }
 
@@ -714,7 +707,7 @@ async fn bookmark(bookmark: web::Json<Bookmark>, config: web::Data<Config>) -> i
     info!("- url: {}", bookmark.url);
 
     match handle_url(&bookmark.url, &bookmark.title, bookmark.folder.clone(), &config).await {
-        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+        Ok(()) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
         Err(e) => {
             error!("Failed to process bookmark: {:?}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()}))
