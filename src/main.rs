@@ -75,7 +75,7 @@ struct Bookmark {
     date: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 struct Frontmatter {
     date: String,
     day: String,
@@ -86,19 +86,6 @@ struct Frontmatter {
     published: String,
 }
 
-impl Default for Frontmatter {
-    fn default() -> Self {
-        Self {
-            date: String::new(),
-            day: String::new(),
-            time: String::new(),
-            tags: vec![],
-            url: String::new(),
-            author: String::new(),
-            published: String::new(),
-        }
-    }
-}
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
