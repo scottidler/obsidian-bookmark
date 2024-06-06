@@ -892,7 +892,7 @@ mod tests {
     #[test]
     fn test_extract_title_and_tags() {
         let text = "(1) Test title with #tag1 and #tag2";
-        let (title, tags) = extract_title_and_tags(text);
+        let (title, tags) = extract_title_and_tags(text)?;
         assert_eq!(title, "Test title with and");
         assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
     }
@@ -900,7 +900,7 @@ mod tests {
     #[test]
     fn test_extract_title_and_tags_no_prefix() {
         let text = "Test title with #tag1 and #tag2";
-        let (title, tags) = extract_title_and_tags(text);
+        let (title, tags) = extract_title_and_tags(text)?;
         assert_eq!(title, "Test title with and");
         assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
     }
