@@ -882,8 +882,7 @@ mod tests {
             Some("test_folder".to_string()),
             &config.frontmatter,
             "published_date",
-        )
-        .await;
+        );
 
         assert!(
             result.is_ok(),
