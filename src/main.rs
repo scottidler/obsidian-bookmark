@@ -64,16 +64,11 @@ struct Cli {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
 struct Bookmark {
-    id: String,
-    index: usize,
     title: String,
-    date_added: u64,
     url: String,
     folder: Option<String>,
-    #[serde(rename = "type")]
-    bookmark_type: String,
+    date: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]

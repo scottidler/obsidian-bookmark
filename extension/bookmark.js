@@ -38,9 +38,7 @@ async function processBookmark(bookmark) {
     }
 
     try {
-        console.log('parentId:', bookmark.parentId);
         const folderName = await getFolderName(bookmark.parentId);
-        console.log('folderName:', folderName);
 
         const response = await fetch('http://localhost:5000/process_bookmark', {
             method: 'POST',
@@ -48,8 +46,10 @@ async function processBookmark(bookmark) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                ...bookmark,
-                folder: folderName // Send null if folderName is not found
+                title: bookmark.title,
+                url: bookmark.url,
+                folder: folderName,
+                date: new Date(bookmark.dateAdded).toISOString(),
             })
         });
 
