@@ -15,7 +15,7 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path,PathBuf};
 use url::Url;
 
 lazy_static! {
@@ -342,7 +342,7 @@ async fn create_markdown_file(
     url: &str,
     author: &str,
     tags: &[String],
-    vault_path: &PathBuf,
+    vault_path: &Path,
     folder: Option<String>,
     frontmatter: &Frontmatter,
     published: &str,
