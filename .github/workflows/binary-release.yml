@@ -55,7 +55,6 @@ jobs:
         run: |
           mkdir -p artifacts/
           cp target/${{ matrix.target }}/release/obsidian-bookmark artifacts/
-          tar -czvf obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts obsidian-bookmark
 
       - name: Package extension
         run: |
@@ -64,13 +63,14 @@ jobs:
 
       - name: Archive artifacts
         run: |
-          mv obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz artifacts/
+          tar -czvf artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts obsidian-bookmark
+          mv artifacts/obsidian-bookmark.xpi artifacts/obsidian-bookmark-${{ github.ref_name }}.xpi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: artifacts
-          path: artifacts/
+          path: artifacts/*
 
   create-release:
     needs: build-and-package
