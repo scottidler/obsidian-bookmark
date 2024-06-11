@@ -1,0 +1,89 @@
+name: binary-release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  RUST_VERSION: 1.78.0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            suffix: macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set GIT_DESCRIBE environment variable
+        run: |
+          GIT_DESCRIBE=$(git describe --tags --dirty --always)
+          echo "GIT_DESCRIBE=$GIT_DESCRIBE" >> $GITHUB_ENV
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Set up Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_VERSION }}
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustup target add ${{ matrix.target }}
+
+      - name: Build for ${{ matrix.target }}
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Rust binary
+        run: |
+          mkdir -p artifacts/
+          cp target/${{ matrix.target }}/release/obsidian-bookmark artifacts/
+          tar -czvf obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts obsidian-bookmark
+
+      - name: Package extension
+        run: |
+          cd path/to/your/extension
+          zip -r ../../artifacts/obsidian-bookmark.xpi ./*
+
+      - name: Archive artifacts
+        run: |
+          mv obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: artifacts/
+
+  create-release:
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 'artifacts/**'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
