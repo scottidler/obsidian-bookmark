@@ -59,8 +59,8 @@ jobs:
 
       - name: Package extension
         run: |
-          cd path/to/your/extension
-          zip -r ../../artifacts/obsidian-bookmark.xpi ./*
+          cd extension
+          zip -r ../artifacts/obsidian-bookmark.xpi ./*
 
       - name: Archive artifacts
         run: |
