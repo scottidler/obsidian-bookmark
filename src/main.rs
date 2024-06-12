@@ -711,7 +711,13 @@ fn remove_utm_source(url: &str) -> Result<String> {
     let mut query_pairs = parsed_url.query_pairs().into_owned().collect::<Vec<(String, String)>>();
     query_pairs.retain(|(key, _)| key != "utm_source");
     parsed_url.query_pairs_mut().clear().extend_pairs(query_pairs);
-    Ok(parsed_url.into())
+
+    // If there are no query parameters left, clear the query part
+    if parsed_url.query_pairs().count() == 0 {
+        parsed_url.set_query(None);
+    }
+
+    Ok(parsed_url.to_string())
 }
 
 async fn handle_url(url: &str, title: &str, folder: Option<String>, config: &Config) -> Result<()> {
