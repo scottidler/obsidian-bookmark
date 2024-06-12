@@ -59,9 +59,13 @@ jobs:
       - name: Package extension
         run: |
           cd extension
-          zip -r ../artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.xpi ./*
+          zip -r ../artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.xpi manifest.json bookmark.js
 
-      - name: Archive artifacts
+      - name: Verify extension package
+        run: |
+          file ../artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.xpi
+
+      - name: Archive Rust artifacts
         run: |
           tar -czvf artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts obsidian-bookmark
 
@@ -74,7 +78,7 @@ jobs:
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4
         with:
-          name: obsidian-bookmark-${{ github.ref_name }}-extension-${{ matrix.suffix }}
+          name: obsidian-bookmark-extension-${{ github.ref_name }}-${{ matrix.suffix }}
           path: artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.xpi
 
   create-release:
@@ -90,7 +94,7 @@ jobs:
       - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
-          name: obsidian-bookmark-${{ github.ref_name }}-extension-linux
+          name: obsidian-bookmark-extension-${{ github.ref_name }}-linux
           path: artifacts/
 
       - name: Create Release
