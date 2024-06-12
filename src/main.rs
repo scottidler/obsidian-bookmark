@@ -707,12 +707,12 @@ async fn handle_weblink_url(
 }
 
 fn remove_utm_source(url: &str) -> Result<String> {
+    debug!("remove_utm_source: url={}", url);
     let mut parsed_url = Url::parse(url).map_err(|e| eyre!("Failed to parse URL: {}", e))?;
     let mut query_pairs = parsed_url.query_pairs().into_owned().collect::<Vec<(String, String)>>();
     query_pairs.retain(|(key, _)| key != "utm_source");
     parsed_url.query_pairs_mut().clear().extend_pairs(query_pairs);
 
-    // If there are no query parameters left, clear the query part
     if parsed_url.query_pairs().count() == 0 {
         parsed_url.set_query(None);
     }
@@ -726,6 +726,7 @@ async fn handle_url(url: &str, title: &str, folder: Option<String>, config: &Con
         url, title, folder, config
     );
     let url = remove_utm_source(url)?;
+    debug!("utm_source removed url={}", url);
     match LinkType::from_url(&url, config)? {
         LinkType::Shorts(url, default_folder, width, height) => {
             handle_shorts_url(&url, title, folder.or(Some(default_folder)), width, height, config).await
