@@ -59,26 +59,38 @@ jobs:
       - name: Package extension
         run: |
           cd extension
-          zip -r ../artifacts/obsidian-bookmark.xpi ./*
+          zip -r ../artifacts/obsidian-bookmark-${{ matrix.suffix }}.xpi ./*
 
       - name: Archive artifacts
         run: |
           tar -czvf artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts obsidian-bookmark
-          mv artifacts/obsidian-bookmark.xpi artifacts/obsidian-bookmark-${{ github.ref_name }}.xpi
 
-      - name: Upload artifacts
+      - name: Upload Rust binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts
-          path: artifacts/*
+          name: obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}
+          path: artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obsidian-bookmark-${{ github.ref_name }}-extension-${{ matrix.suffix }}
+          path: artifacts/obsidian-bookmark-${{ matrix.suffix }}.xpi
 
   create-release:
     needs: build-and-package
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download Rust binary artifact
         uses: actions/download-artifact@v4
         with:
+          name: obsidian-bookmark-${{ github.ref_name }}-linux
+          path: artifacts/
+
+      - name: Download extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: obsidian-bookmark-${{ github.ref_name }}-extension-linux
           path: artifacts/
 
       - name: Create Release
