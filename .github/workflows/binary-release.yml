@@ -59,7 +59,7 @@ jobs:
       - name: Package extension
         run: |
           cd extension
-          zip -r ../artifacts/obsidian-bookmark-${{ matrix.suffix }}.xpi ./*
+          zip -r ../artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.xpi ./*
 
       - name: Archive artifacts
         run: |
@@ -75,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: obsidian-bookmark-${{ github.ref_name }}-extension-${{ matrix.suffix }}
-          path: artifacts/obsidian-bookmark-${{ matrix.suffix }}.xpi
+          path: artifacts/obsidian-bookmark-${{ github.ref_name }}-${{ matrix.suffix }}.xpi
 
   create-release:
     needs: build-and-package
