@@ -1,6 +1,6 @@
 {
     "manifest_version": 2,
-    "name": "Bookmarks Interceptor",
+    "name": "obsidian-bookmark",
     "version": "1.0",
     "permissions": [
         "bookmarks",
@@ -8,6 +8,11 @@
     ],
     "background": {
         "scripts": ["bookmark.js"]
+    },
+    "applications": {
+        "gecko": {
+            "id": "scottidler@obsidian-bookmark"
+        }
     }
 }
 
