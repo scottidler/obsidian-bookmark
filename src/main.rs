@@ -205,54 +205,45 @@ fn get_resolution(link_name: &str, config: &Config) -> Result<(usize, usize)> {
     }
 }
 
-fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: &[String], published: &str) -> String {
+fn get_field_value<T: Clone + Default + PartialEq>(incoming: &T, default: &T, fallback: T) -> T {
+    if incoming != &T::default() {
+        incoming.clone()
+    } else if default != &T::default() {
+        default.clone()
+    } else {
+        fallback
+    }
+}
+
+fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: &[String], published: &str, default_frontmatter: &Frontmatter) -> Frontmatter {
     debug!(
         "format_frontmatter: frontmatter={:?} url={} author={} tags={:?}",
         frontmatter, url, author, tags
     );
-    let mut frontmatter_str = String::from("---\n");
 
     let (current_date, current_day, current_time) = today();
-    frontmatter_str += &format!(
-        "date: {}\n",
-        if frontmatter.date.is_empty() {
-            current_date
-        } else {
-            frontmatter.date.clone()
-        }
-    );
-    frontmatter_str += &format!(
-        "day: {}\n",
-        if frontmatter.day.is_empty() { current_day } else { frontmatter.day.clone() }
-    );
-    frontmatter_str += &format!(
-        "time: {}\n",
-        if frontmatter.time.is_empty() {
-            current_time
-        } else {
-            frontmatter.time.clone()
-        }
-    );
 
-    frontmatter_str += "tags:\n";
-    for tag in tags {
-        frontmatter_str += &format!("  - {}\n", sanitize_tag(tag));
+    let date = get_field_value(&frontmatter.date, &default_frontmatter.date, current_date);
+    let day = get_field_value(&frontmatter.day, &default_frontmatter.day, current_day);
+    let time = get_field_value(&frontmatter.time, &default_frontmatter.time, current_time);
+
+    let mut combined_tags: HashSet<String> = tags.iter().cloned().collect();
+    combined_tags.extend(default_frontmatter.tags.iter().cloned());
+    let tags: Vec<String> = combined_tags.into_iter().collect();
+
+    let url = get_field_value(&frontmatter.url, &default_frontmatter.url, url.to_string());
+    let author = get_field_value(&frontmatter.author, &default_frontmatter.author, author.to_string());
+    let published = get_field_value(&frontmatter.published, &default_frontmatter.published, published.to_string());
+
+    Frontmatter {
+        date,
+        day,
+        time,
+        tags,
+        url,
+        author,
+        published,
     }
-
-    frontmatter_str += &format!("url: {url}\n");
-    frontmatter_str += &format!("author: {author}\n");
-    frontmatter_str += &format!(
-        "published: {}\n",
-        if frontmatter.published.is_empty() {
-            published.to_string()
-        } else {
-            frontmatter.published.clone()
-        }
-    );
-    frontmatter_str += &format!("type: {}\n", frontmatter.url);
-
-    frontmatter_str += "---\n\n";
-    frontmatter_str
 }
 
 fn sanitize_tag(tag: &str) -> String {
@@ -352,7 +343,6 @@ fn create_markdown_file(
     vault_path: &Path,
     folder: Option<String>,
     frontmatter: &Frontmatter,
-    published: &str,
 ) -> Result<()> {
     info!("create_markdown_file: title={} description={} embed_code={} url={} author={} tags={:?} vault_path={} folder={:?} frontmatter={:?}", title, description, embed_code, url, author, tags, vault_path.display(), folder, frontmatter);
     let vault_path_str = vault_path
@@ -377,7 +367,19 @@ fn create_markdown_file(
     let mut file = std::fs::File::create(&file_path)
         .map_err(|e| eyre!("Failed to create markdown file: {:?} with error {}", file_path, e))?;
 
-    let frontmatter_str = format_frontmatter(frontmatter, url, author, tags, published);
+    let frontmatter_str = format!(
+        "---\ndate: {}\nday: {}\ntime: {}\ntags:\n",
+        frontmatter.date, frontmatter.day, frontmatter.time
+    );
+    for tag in &frontmatter.tags {
+        writeln!(file, "  - {}", sanitize_tag(tag))?;
+    }
+    writeln!(file, "url: {}", frontmatter.url)?;
+    writeln!(file, "author: {}", frontmatter.author)?;
+    writeln!(file, "published: {}", frontmatter.published)?;
+    writeln!(file, "type: link")?;
+    writeln!(file, "---\n")?;
+
     write!(
         file,
         "{frontmatter_str}\n{embed_code}\n\n## Description\n{description}"
@@ -607,6 +609,15 @@ async fn handle_shorts_url(
     combined_tags.extend(metadata.tags);
     let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
+    let frontmatter = format_frontmatter(
+        &config.frontmatter,
+        url,
+        &metadata.channel,
+        &combined_tags,
+        &metadata.published_at,
+        &config.frontmatter,
+    );
+
     create_markdown_file(
         &final_title,
         &metadata.description,
@@ -616,8 +627,7 @@ async fn handle_shorts_url(
         &combined_tags,
         &config.vault,
         folder,
-        &config.frontmatter,
-        &metadata.published_at,
+        &frontmatter,
     )
 }
 
@@ -648,6 +658,15 @@ async fn handle_youtube_url(
     combined_tags.extend(metadata.tags);
     let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
+    let frontmatter = format_frontmatter(
+        &config.frontmatter,
+        url,
+        &metadata.channel,
+        &combined_tags,
+        &metadata.published_at,
+        &config.frontmatter,
+    );
+
     create_markdown_file(
         &final_title,
         &metadata.description,
@@ -657,8 +676,7 @@ async fn handle_youtube_url(
         &combined_tags,
         &config.vault,
         folder,
-        &config.frontmatter,
-        &metadata.published_at,
+        &frontmatter,
     )
 }
 
@@ -693,6 +711,15 @@ async fn handle_weblink_url(
     combined_tags.extend(fetched_tags);
     let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
+    let frontmatter = format_frontmatter(
+        &config.frontmatter,
+        url,
+        &author,
+        &combined_tags,
+        &published,
+        &config.frontmatter,
+    );
+
     create_markdown_file(
         &final_title,
         &summary,
@@ -702,8 +729,7 @@ async fn handle_weblink_url(
         &combined_tags,
         &config.vault,
         folder,
-        &config.frontmatter,
-        &published,
+        &frontmatter,
     )
 }
 
