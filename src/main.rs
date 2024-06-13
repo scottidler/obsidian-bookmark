@@ -87,6 +87,19 @@ struct Frontmatter {
     published: String,
 }
 
+impl Frontmatter {
+    fn merge(&self, actual: &Frontmatter) -> Frontmatter {
+        Frontmatter {
+            date: if actual.date.is_empty() { self.date.clone() } else { actual.date.clone() },
+            day: if actual.day.is_empty() { self.day.clone() } else { actual.day.clone() },
+            time: if actual.time.is_empty() { self.time.clone() } else { actual.time.clone() },
+            tags: if actual.tags.is_empty() { self.tags.clone() } else { actual.tags.clone() },
+            url: if actual.url.is_empty() { self.url.clone() } else { actual.url.clone() },
+            author: if actual.author.is_empty() { self.author.clone() } else { actual.author.clone() },
+            published: if actual.published.is_empty() { self.published.clone() } else { actual.published.clone() },
+        }
+    }
+}
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
@@ -609,14 +622,14 @@ async fn handle_shorts_url(
     combined_tags.extend(metadata.tags);
     let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
-    let frontmatter = format_frontmatter(
+    let frontmatter = config.frontmatter.merge(&format_frontmatter(
         &config.frontmatter,
         url,
         &metadata.channel,
         &combined_tags,
         &metadata.published_at,
         &config.frontmatter,
-    );
+    ));
 
     create_markdown_file(
         &final_title,
@@ -658,14 +671,14 @@ async fn handle_youtube_url(
     combined_tags.extend(metadata.tags);
     let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
-    let frontmatter = format_frontmatter(
+    let frontmatter = config.frontmatter.merge(&format_frontmatter(
         &config.frontmatter,
         url,
         &metadata.channel,
         &combined_tags,
         &metadata.published_at,
         &config.frontmatter,
-    );
+    ));
 
     create_markdown_file(
         &final_title,
@@ -711,14 +724,14 @@ async fn handle_weblink_url(
     combined_tags.extend(fetched_tags);
     let combined_tags: Vec<String> = combined_tags.into_iter().collect();
 
-    let frontmatter = format_frontmatter(
+    let frontmatter = config.frontmatter.merge(&format_frontmatter(
         &config.frontmatter,
         url,
         &author,
         &combined_tags,
         &published,
         &config.frontmatter,
-    );
+    ));
 
     create_markdown_file(
         &final_title,
