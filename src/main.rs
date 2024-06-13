@@ -19,6 +19,7 @@ use std::path::{Path,PathBuf};
 use url::Url;
 
 lazy_static! {
+    static ref OBSIDIAN_BOOKMARK_PORT: String = env::var("OBSIDIAN_BOOKMARK_PORT").unwrap_or_else(|_| "65000".to_string());
     static ref TIMEZONE: Tz = "America/Los_Angeles".parse().expect("Invalid timezone");
     static ref YOUTUBE_API_KEY: String = env::var("YOUTUBE_API_KEY").expect("YOUTUBE_API_KEY not set in environment");
     static ref CHATGPT_API_KEY: String = env::var("CHATGPT_API_KEY").expect("CHATGPT_API_KEY not set in environment");
@@ -52,7 +53,7 @@ lazy_static! {
 
 #[derive(Parser, Debug)]
 struct Cli {
-    #[arg(long, default_value = "5000")]
+    #[arg(long, default_value = "65000")]
     port: u16,
 
     #[arg(long, default_value = "2")]
@@ -792,6 +793,7 @@ async fn main() -> Result<()> {
     init_logger();
 
     let cli = Cli::parse();
+    let port = OBSIDIAN_BOOKMARK_PORT.parse::<u16>().unwrap_or(cli.port);
     info!("Starting server with POST endpoint: /process_bookmark");
     info!("Starting server on port: {}", cli.port);
 
@@ -813,8 +815,8 @@ async fn main() -> Result<()> {
     })
     .workers(cli.workers);
 
-    info!("Binding server to 0.0.0.0:{}", cli.port);
-    server.bind(("0.0.0.0", cli.port))?.run().await?;
+    info!("Binding server to 0.0.0.0:{}", port);
+    server.bind(("0.0.0.0", port))?.run().await?;
 
     Ok(())
 }

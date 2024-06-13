@@ -40,7 +40,7 @@ async function processBookmark(bookmark) {
     try {
         const folderName = await getFolderName(bookmark.parentId);
 
-        const response = await fetch('http://localhost:5000/process_bookmark', {
+        const response = await fetch('http://localhost:65000/process_bookmark', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
