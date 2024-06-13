@@ -7,6 +7,7 @@ const DEFAULT_URLS = [
     'https://www.mozilla.org/firefox/?utm_medium=firefox-desktop&utm_source=bookmarks-toolbar&utm_campaign=new-users&utm_content=-global'
 ];
 const INTERVAL = 60 * 1000; // 60s * 1000ms => 1m
+const BASE_URL = 'http://localhost:65000';
 
 function isUnsupportedUrl(url) {
     return UNSUPPORTED_SCHEMES.some(scheme => url.startsWith(scheme));
@@ -40,7 +41,7 @@ async function processBookmark(bookmark) {
     try {
         const folderName = await getFolderName(bookmark.parentId);
 
-        const response = await fetch('http://localhost:65000/process_bookmark', {
+        const response = await fetch(`${BASE_URL}/bookmark`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -68,7 +69,7 @@ async function processBookmark(bookmark) {
 
 async function isBackendAvailable() {
     try {
-        const response = await fetch('http://localhost:5000/health');
+        const response = await fetch(`${BASE_URL}/health`);
         return response.ok;
     } catch (error) {
         return false;

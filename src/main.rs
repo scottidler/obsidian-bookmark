@@ -741,7 +741,7 @@ async fn handle_url(url: &str, title: &str, folder: Option<String>, config: &Con
     }
 }
 
-#[post("/process_bookmark")]
+#[post("/bookmark")]
 async fn bookmark(bookmark: web::Json<Bookmark>, config: web::Data<Config>) -> impl Responder {
     info!("bookmark:");
     info!("- title: {}", bookmark.title);
