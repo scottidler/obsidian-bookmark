@@ -242,7 +242,8 @@ fn format_frontmatter(frontmatter: &Frontmatter, url: &str, author: &str, tags: 
 
     let mut combined_tags: HashSet<String> = tags.iter().cloned().collect();
     combined_tags.extend(default_frontmatter.tags.iter().cloned());
-    let tags: Vec<String> = combined_tags.into_iter().collect();
+    let mut tags: Vec<String> = combined_tags.into_iter().collect();
+    tags.sort();
 
     let url = get_field_value(&frontmatter.url, &default_frontmatter.url, url.to_string());
     let author = get_field_value(&frontmatter.author, &default_frontmatter.author, author.to_string());
@@ -343,6 +344,8 @@ fn extract_title_and_tags(text: &str) -> Result<(String, Vec<String>)> {
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect();
     let title = re.replace_all(text, "").to_string();
+    // Fix: Remove extra spaces from the title
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
     Ok((title.trim().to_string(), tags))
 }
 
@@ -380,10 +383,11 @@ fn create_markdown_file(
     let mut file = std::fs::File::create(&file_path)
         .map_err(|e| eyre!("Failed to create markdown file: {:?} with error {}", file_path, e))?;
 
-    let frontmatter_str = format!(
-        "---\ndate: {}\nday: {}\ntime: {}\ntags:\n",
-        frontmatter.date, frontmatter.day, frontmatter.time
-    );
+    writeln!(file, "---")?;
+    writeln!(file, "date: {}", frontmatter.date)?;
+    writeln!(file, "day: {}", frontmatter.day)?;
+    writeln!(file, "time: {}", frontmatter.time)?;
+    writeln!(file, "tags:")?;
     for tag in &frontmatter.tags {
         writeln!(file, "  - {}", sanitize_tag(tag))?;
     }
@@ -395,7 +399,8 @@ fn create_markdown_file(
 
     write!(
         file,
-        "{frontmatter_str}\n{embed_code}\n\n## Description\n{description}"
+        "{}\n\n## Description\n{}",
+        embed_code, description
     )
     .map_err(|e| eyre!("Failed to write to markdown file: {}", e))
 }
@@ -873,6 +878,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_malformed_frontmatter_handling() -> Result<()> {
+        let config = load_test_config();
+
+        let malformed_frontmatter = Frontmatter {
+            date: "2024-06-14".to_string(),
+            day: "Fri".to_string(),
+            time: "23:41".to_string(),
+            tags: vec![
+                "anatomy-of-a-play".to_string(),
+                "mills-concept-football".to_string(),
+                "national-football-league".to_string(),
+                "weekly-spiral".to_string(),
+                "football-basics".to_string(),
+                "mills".to_string(),
+                "american-football--sport-".to_string(),
+                "passing-game".to_string(),
+                "american-football".to_string(),
+                "mills-concept".to_string(),
+                "football-101".to_string(),
+            ],
+            url: "https://www.youtube.com/watch?v=7sgCH4U7rjU&t=32s".to_string(),
+            author: "Weekly Spiral".to_string(),
+            published: "2021-08-16T15:29:39Z".to_string(),
+        };
+
+        let expected_output = r#"---
+    date: 2024-06-14
+    day: Fri
+    time: 23:41
+    tags:
+    - american-football
+    - american-football--sport-
+    - anatomy-of-a-play
+    - football-101
+    - football-basics
+    - mills
+    - mills-concept
+    - mills-concept-football
+    - national-football-league
+    - passing-game
+    - weekly-spiral
+    url: https://www.youtube.com/watch?v=7sgCH4U7rjU&t=32s
+    author: Weekly Spiral
+    published: 2021-08-16T15:29:39Z
+    type: link
+    ---"#;
+
+        let formatted_frontmatter = format_frontmatter(
+            &malformed_frontmatter,
+            &malformed_frontmatter.url,
+            &malformed_frontmatter.author,
+            &malformed_frontmatter.tags,
+            &malformed_frontmatter.published,
+            &config.frontmatter,
+        );
+
+        let frontmatter_str = format!(
+            "---\ndate: {}\nday: {}\ntime: {}\ntags:\n",
+            formatted_frontmatter.date, formatted_frontmatter.day, formatted_frontmatter.time
+        );
+
+        let mut tags_str = String::new();
+        for tag in &formatted_frontmatter.tags {
+            tags_str.push_str(&format!("  - {}\n", sanitize_tag(tag)));
+        }
+
+        let final_output = format!(
+            "{}{}url: {}\nauthor: {}\npublished: {}\ntype: link\n---",
+            frontmatter_str,
+            tags_str,
+            formatted_frontmatter.url,
+            formatted_frontmatter.author,
+            formatted_frontmatter.published
+        );
+
+        // Improved output for debugging
+        println!("Left:\n{}\n", final_output);
+        println!("Right:\n{}\n", expected_output);
+
+        assert_eq!(final_output, expected_output, "Malformed frontmatter should be formatted correctly");
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_youtube_shorts_identification() -> Result<()> {
         let config = load_test_config();
         let shorts_urls = vec![
@@ -975,7 +1065,6 @@ mod tests {
             &config.vault,
             Some("test_folder".to_string()),
             &config.frontmatter,
-            "published_date",
         );
 
         assert!(
