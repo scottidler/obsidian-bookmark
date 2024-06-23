@@ -338,14 +338,25 @@ fn generate_image_embed_code(img_url: &str, width: usize, height: usize) -> Stri
 }
 
 fn extract_title_and_tags(text: &str) -> Result<(String, Vec<String>)> {
+    let mut modified_text = text.to_string();
+
+    // Clean the title by removing specific prefixes and suffixes
+    if modified_text.starts_with("(2) ") {
+        modified_text = modified_text[4..].to_string(); // Remove the prefix "(2) "
+    }
+    if let Some(pos) = modified_text.rfind(" - YouTube") {
+        modified_text = modified_text[..pos].to_string(); // Remove the suffix " - YouTube"
+    }
+
     let re = Regex::new(r"(?i)\(1\)\s*|#(\w+)").map_err(|e| eyre!("Failed to compile regex: {}", e))?;
     let tags: Vec<String> = re
-        .captures_iter(text)
+        .captures_iter(&modified_text)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect();
-    let title = re.replace_all(text, "").to_string();
+    let mut title = re.replace_all(&modified_text, "").to_string();
     // Fix: Remove extra spaces from the title
-    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+
     Ok((title.trim().to_string(), tags))
 }
 
