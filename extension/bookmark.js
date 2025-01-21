@@ -59,11 +59,11 @@ async function processBookmark(bookmark) {
             await browser.bookmarks.remove(bookmark.id);
         } else {
             console.error('Failed to process bookmark');
-            alert('Failed to process bookmark. Please try again later.');
+            console.log('Failed to process bookmark. Please try again later.');
         }
     } catch (error) {
         console.error('Error sending bookmark:', error);
-        alert('Failed to process bookmark. Please try again later.');
+        console.log('Failed to process bookmark. Please try again later.');
     }
 }
 

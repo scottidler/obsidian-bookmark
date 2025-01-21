@@ -154,6 +154,7 @@ impl LinkType {
 
         for link in &config.links {
             let regex = Regex::new(&link.regex)?;
+            debug!("before regex.is_match on {:?}", url);
             if regex.is_match(url) {
                 let (width, height) = get_resolution(&link.name, config)?;
                 if link.name == "default" {
