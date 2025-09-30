@@ -52,6 +52,7 @@ lazy_static! {
 }
 
 #[derive(Parser, Debug)]
+#[command(name = "obsidian-bookmark", version = env!("GIT_DESCRIBE"), about = "Obsidian bookmark manager")]
 struct Cli {
     #[arg(long, default_value = "65000")]
     port: u16,
