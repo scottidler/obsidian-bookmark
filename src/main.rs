@@ -917,26 +917,26 @@ mod tests {
         };
 
         let expected_output = r#"---
-    date: 2024-06-14
-    day: Fri
-    time: 23:41
-    tags:
-    - american-football
-    - american-football--sport-
-    - anatomy-of-a-play
-    - football-101
-    - football-basics
-    - mills
-    - mills-concept
-    - mills-concept-football
-    - national-football-league
-    - passing-game
-    - weekly-spiral
-    url: https://www.youtube.com/watch?v=7sgCH4U7rjU&t=32s
-    author: Weekly Spiral
-    published: 2021-08-16T15:29:39Z
-    type: link
-    ---"#;
+date: 2024-06-14
+day: Fri
+time: 23:41
+tags:
+  - american-football
+  - american-football--sport-
+  - anatomy-of-a-play
+  - football-101
+  - football-basics
+  - mills
+  - mills-concept
+  - mills-concept-football
+  - national-football-league
+  - passing-game
+  - weekly-spiral
+url: https://www.youtube.com/watch?v=7sgCH4U7rjU&t=32s
+author: Weekly Spiral
+published: 2021-08-16T15:29:39Z
+type: link
+---"#;
 
         let formatted_frontmatter = format_frontmatter(
             &malformed_frontmatter,
